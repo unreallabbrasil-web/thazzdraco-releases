@@ -1030,3 +1030,22 @@ body.perf .pt{display:none}body.perf .bolt{opacity:0}body.perf .energy-pulse.on{
 .btn-update:hover{background:#1e6e30}
 .btn-dismiss-update{background:none;border:none;color:#6aaf7a;font-size:16px;cursor:pointer;padding:2px 6px;flex-shrink:0;opacity:.7}
 .btn-dismiss-update:hover{opacity:1}
+
+/* ===== F1: Monitor de Temperatura ao vivo =================================== */
+.temp-monitor{display:flex;gap:14px;align-items:flex-start;margin-bottom:16px}
+.temp-stats{display:flex;flex-direction:column;gap:8px;min-width:96px}
+.temp-stat{display:flex;flex-direction:column;align-items:center;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 14px;gap:2px}
+.temp-stat .ts-lbl{font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.1em}
+.temp-stat b{font-size:20px;color:var(--cyan);font-variant-numeric:tabular-nums;transition:color .3s}
+.temp-legend{display:flex;gap:7px;font-size:10px;color:var(--ink-3);align-items:center;padding:5px 6px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm)}
+.temp-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:2px;vertical-align:middle}
+.temp-chart-canvas{flex:1;height:130px;border-radius:var(--r-sm);background:var(--panel-2);border:1px solid var(--line);min-width:0;display:block}
+
+/* ===== F5: Score antes × depois ============================================= */
+.score-result{display:flex;align-items:center;justify-content:center;gap:28px;padding:20px 0 12px}
+.sr-col{display:flex;flex-direction:column;align-items:center;gap:4px}
+.sr-lbl{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.1em}
+.sr-num{font-size:60px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;font-family:var(--font-display)}
+.sr-arrow{display:flex;flex-direction:column;align-items:center;color:var(--green);font-size:28px;line-height:1;gap:2px}
+.sr-diff{font-size:15px;color:var(--green);font-weight:700;font-variant-numeric:tabular-nums}
+.sr-sub{text-align:center;color:var(--ink-3);font-size:12px;padding-bottom:4px}

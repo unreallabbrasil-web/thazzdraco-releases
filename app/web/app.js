@@ -1200,10 +1200,38 @@ async function doScan() {
   const ic = $("#scanCta [data-icon]"); if (ic) ic.innerHTML = IC("scan");
 }
 function afterMutation(data) {
+  const scoreBefore = state.scan ? state.scan.score : null;
   if (data.scan) ingest(data.scan);
   const rep = data.relatorio || {};
   if (rep.requer_reboot) $("#reboot").classList.add("show");
-  if ((rep.aplicadas || []).length) pulseEnergy(); // #2
+  const n = (rep.aplicadas || []).length;
+  if (n) {
+    pulseEnergy();
+    if (scoreBefore !== null) {
+      const scoreAfter = (state.scan && state.scan.score) || 0;
+      if (scoreAfter > scoreBefore) showScoreResult(scoreBefore, scoreAfter, n);
+    }
+  }
+}
+
+// F5: exibe modal comparando score antes × depois da otimização
+function showScoreResult(antes, depois, n) {
+  const diff = depois - antes;
+  const colAntes = scoreColor(antes), colDepois = scoreColor(depois);
+  infoModal("Resultado da otimização", `
+    <div class="score-result">
+      <div class="sr-col">
+        <span class="sr-lbl">Antes</span>
+        <b class="sr-num" style="color:${colAntes}">${antes}</b>
+      </div>
+      <div class="sr-arrow">▲<span class="sr-diff">+${diff}</span></div>
+      <div class="sr-col">
+        <span class="sr-lbl">Depois</span>
+        <b class="sr-num" style="color:${colDepois}">${depois}</b>
+      </div>
+    </div>
+    <div class="sr-sub">${n} otimização${n > 1 ? "ões" : ""} aplicada${n > 1 ? "s" : ""} · score subiu ${diff} ${diff === 1 ? "ponto" : "pontos"}</div>
+  `);
 }
 let _adminWarned = false;
 function adminWarn() {
@@ -2853,6 +2881,11 @@ function openCreatePresetModal() {
 const PERF_MAX = 300; // ~10 min a 2s por amostra
 const PERF_KEY = "tz_perf_hist";
 
+/* ---- F1: Monitor de Temperatura ao vivo ----------------------------------- */
+const TEMP_MAX = 90; // ~3min a 2s por amostra
+let tempHist = [];
+let _tempAlerted = false;
+
 function perfHistoryPush(m) {
   const cpu = m.cpu_pct || 0;
   const ram = m.ram?.pct || 0;
@@ -2869,10 +2902,63 @@ function perfHistoryPush(m) {
   try { localStorage.setItem(PERF_KEY, JSON.stringify(hist)); } catch (e) {}
   // atualiza o chart se a aba histórico estiver visível
   if (state.page === "historico") renderPerfChart();
+  // F1: histórico de temperatura em memória
+  const gpuT = (gpus.length && gpus[0].temp_c >= 0) ? gpus[0].temp_c : -1;
+  const cpuT = m.cpu_temp_c ?? -1;
+  tempHist.push({ t, cpu: cpuT, gpu: gpuT });
+  if (tempHist.length > TEMP_MAX) tempHist = tempHist.slice(-TEMP_MAX);
+  const maxT = Math.max(cpuT, gpuT);
+  if (!_tempAlerted && maxT >= 90) { _tempAlerted = true; toast("err", "Temperatura crítica!", `${maxT}°C — risco de throttling térmico.`); }
+  else if (maxT < 85) _tempAlerted = false;
+  if (state.page === "medicao") renderTempChart();
 }
 
 function perfHistoryLoad() {
   try { return JSON.parse(localStorage.getItem(PERF_KEY) || "[]"); } catch (e) { return []; }
+}
+
+function renderTempChart() {
+  const canvas = document.getElementById("tempChartCanvas");
+  if (!canvas) return;
+  const W = canvas.offsetWidth || 600, H = 130;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+  const TMIN = 20, TMAX = 100;
+  const ty = (t) => H - ((Math.min(TMAX, Math.max(TMIN, t)) - TMIN) / (TMAX - TMIN)) * H;
+  // grade horizontal
+  ctx.lineWidth = 1;
+  [40, 60, 80].forEach((v) => {
+    ctx.strokeStyle = "#0f1f30"; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(0, ty(v)); ctx.lineTo(W, ty(v)); ctx.stroke();
+  });
+  // linha 90°C (alerta)
+  const y90 = ty(90);
+  ctx.strokeStyle = "rgba(255,80,60,0.45)"; ctx.setLineDash([4, 5]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, y90); ctx.lineTo(W, y90); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(255,80,60,0.6)"; ctx.font = "10px monospace"; ctx.textAlign = "right";
+  ctx.fillText("90°C", W - 4, y90 - 3); ctx.textAlign = "left";
+  if (tempHist.length < 2) {
+    ctx.fillStyle = "#2a4a6a"; ctx.font = "12px monospace"; ctx.textAlign = "center";
+    ctx.fillText("Aguardando amostras de temperatura…", W / 2, H / 2); return;
+  }
+  [{ key: "cpu", color: "#ff6030" }, { key: "gpu", color: "#b060ff" }].forEach(({ key, color }) => {
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2;
+    let first = true;
+    tempHist.forEach((pt, i) => {
+      if (pt[key] < 0) { first = true; return; }
+      const x = (i / (tempHist.length - 1)) * W, y = ty(pt[key]);
+      if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+  // atualiza labels
+  const last = tempHist[tempHist.length - 1];
+  const tempColor = (v) => v >= 90 ? "var(--red)" : v >= 75 ? "var(--amber)" : "var(--cyan)";
+  const cpuEl = document.getElementById("tcCpu"), gpuEl = document.getElementById("tcGpu");
+  if (cpuEl) { cpuEl.textContent = last.cpu >= 0 ? last.cpu + "°C" : "N/D"; cpuEl.style.color = last.cpu >= 0 ? tempColor(last.cpu) : ""; }
+  if (gpuEl) { gpuEl.textContent = last.gpu >= 0 ? last.gpu + "°C" : "N/D"; gpuEl.style.color = last.gpu >= 0 ? tempColor(last.gpu) : ""; }
 }
 
 function renderPerfChart() {

@@ -313,6 +313,20 @@
         <div class="ptitle">Desempenho ao vivo</div>
         <div class="perf-top" id="perfTop"></div>
         <div class="mem-detail" id="memDetail"></div>
+
+        <div class="ptitle">Temperatura ao vivo</div>
+        <div class="temp-monitor">
+          <div class="temp-stats">
+            <div class="temp-stat"><span class="ts-lbl">CPU</span><b id="tcCpu">—</b></div>
+            <div class="temp-stat"><span class="ts-lbl">GPU</span><b id="tcGpu">—</b></div>
+            <div class="temp-legend">
+              <span class="temp-dot" style="background:#ff6030"></span>CPU
+              <span class="temp-dot" style="background:#b060ff"></span>GPU
+            </div>
+          </div>
+          <canvas id="tempChartCanvas" class="temp-chart-canvas"></canvas>
+        </div>
+
         <div class="ptitle">Saúde do PC</div>
         <div class="health-box" id="healthBox"></div>
 
