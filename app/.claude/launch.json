@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "thazz",
+      "runtimeExecutable": "E:\\CLAUDE AI\\OPTM\\app\\tz_preview.exe",
+      "runtimeArgs": ["-headless", "-port", "7793"],
+      "port": 7793
+    }
+  ]
+}

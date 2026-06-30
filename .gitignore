@@ -1,0 +1,15 @@
+# Binários compilados
+app/dist/
+app/tz_preview.exe
+app/tz.exe
+app/app/
+
+# Cache Go
+app/vendor/
+
+# Dados locais do Edge
+app/edge-profile/
+
+# Temporários
+*.tmp
+*.log

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>ThazzDraco · Overlay</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#050d14;color:#c8d4e0;font-family:'Courier New',monospace;font-size:13px;user-select:none;overflow:hidden;cursor:move}
+#wrap{display:flex;flex-direction:column;gap:0;width:280px;border:1px solid #1a3048;border-radius:8px;background:#07111b;box-shadow:0 4px 24px #000a}
+#head{display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:#0a1929;border-bottom:1px solid #1a3048;border-radius:7px 7px 0 0}
+#head span{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#3a7bd5}
+#head b{font-size:10px;color:#2a4a6a}
+#body{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#0f1f30;padding:1px;border-radius:0 0 7px 7px}
+.cell{background:#07111b;padding:10px 14px;display:flex;flex-direction:column;gap:4px}
+.cell:first-child{border-radius:0 0 0 6px}
+.cell:last-child{border-radius:0 0 6px 0}
+.lbl{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#2a4a6a}
+.val{font-size:22px;font-weight:700;font-family:'Courier New',monospace;line-height:1}
+.sub{font-size:9px;color:#2a5a7a;margin-top:1px}
+.bar{height:3px;background:#0f1f30;border-radius:2px;margin-top:5px;overflow:hidden}
+.bar-fill{height:100%;border-radius:2px;transition:width .6s ease}
+#status{grid-column:1/-1;background:#060e18;padding:5px 14px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid #0f1f30}
+#stlbl{font-size:9px;letter-spacing:.1em;color:#1a3a5a}
+#stdot{width:6px;height:6px;border-radius:50%;background:#1a3a5a;flex:none}
+#stdot.game{background:#00c47a;box-shadow:0 0 6px #00c47a;animation:p 1.2s ease-in-out infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="head"><span>DRACO // OVERLAY</span><b id="ts">--:--</b></div>
+  <div id="body">
+    <div class="cell" id="cCpu">
+      <span class="lbl">CPU</span>
+      <span class="val" id="vCpu">—</span>
+      <span class="sub" id="sCpu">&nbsp;</span>
+      <div class="bar"><div class="bar-fill" id="bCpu" style="width:0%"></div></div>
+    </div>
+    <div class="cell" id="cRam">
+      <span class="lbl">RAM</span>
+      <span class="val" id="vRam">—</span>
+      <span class="sub" id="sRam">&nbsp;</span>
+      <div class="bar"><div class="bar-fill" id="bRam" style="width:0%"></div></div>
+    </div>
+    <div class="cell" id="cGpu">
+      <span class="lbl">GPU</span>
+      <span class="val" id="vGpu">—</span>
+      <span class="sub" id="sGpu">&nbsp;</span>
+      <div class="bar"><div class="bar-fill" id="bGpu" style="width:0%"></div></div>
+    </div>
+    <div class="cell" id="cTemp">
+      <span class="lbl">CPU TEMP</span>
+      <span class="val" id="vTemp">—</span>
+      <span class="sub" id="sTemp">&nbsp;</span>
+      <div class="bar"><div class="bar-fill" id="bTemp" style="width:0%"></div></div>
+    </div>
+    <div id="status">
+      <span id="stlbl">AGUARDANDO</span>
+      <span id="stdot"></span>
+    </div>
+  </div>
+</div>
+<script>
+function col(pct, hotTemp) {
+  if (hotTemp) return pct > 90 ? "#ff4444" : pct > 75 ? "#ffa030" : "#00c47a";
+  return pct > 85 ? "#ff4444" : pct > 70 ? "#ffa030" : "#41c7ff";
+}
+function set(id, pct, label, sub, isTemp) {
+  const v = document.getElementById("v"+id);
+  const b = document.getElementById("b"+id);
+  const s = document.getElementById("s"+id);
+  const c = col(pct, isTemp);
+  v.textContent = label;
+  v.style.color = c;
+  b.style.width = Math.min(pct,100)+"%";
+  b.style.background = c;
+  if (s && sub) s.textContent = sub;
+}
+function pad(n){return String(n).padStart(2,"0")}
+async function poll() {
+  try {
+    const r = await fetch("/api/metrics");
+    const m = await r.json();
+    const now = new Date();
+    document.getElementById("ts").textContent = pad(now.getHours())+":"+pad(now.getMinutes())+":"+pad(now.getSeconds());
+    const cpu = m.cpu_pct ?? 0;
+    const ram = m.ram?.pct ?? 0;
+    const gpus = m.gpus || [];
+    const g = gpus[0] || {};
+    const gpuPct = g.uso_pct >= 0 ? g.uso_pct : 0;
+    const temp = m.cpu_temp_c ?? -1;
+    set("Cpu", cpu, cpu+"%", "CPU · "+m.uptime, false);
+    set("Ram", ram, ram+"%", (m.ram?.usado_gb??0).toFixed(1)+" / "+(m.ram?.total_gb??0).toFixed(1)+" GB", false);
+    set("Gpu", gpuPct, gpuPct >= 0 ? gpuPct+"%" : "N/A", g.nome ? g.nome.split(" ").slice(-2).join(" ") : "N/A", false);
+    if (temp >= 0) {
+      set("Temp", Math.min((temp/100)*100,100), temp+"°C", temp>85?"QUENTE":temp>70?"MORNO":"OK", true);
+    } else {
+      document.getElementById("vTemp").textContent = "N/A";
+      document.getElementById("sTemp").textContent = "sensor indisponível";
+    }
+    // jogo ao vivo
+    try {
+      const gs = await fetch("/api/modo-game/status");
+      const gd = await gs.json();
+      const dot = document.getElementById("stdot");
+      const lbl = document.getElementById("stlbl");
+      if (gd.ativo && gd.rodando?.length) {
+        dot.className = "game";
+        lbl.textContent = gd.rodando[0].nome.toUpperCase();
+      } else if (gd.ativo) {
+        dot.className = "game";
+        dot.style.background="#3a7bd5";dot.style.boxShadow="none";
+        lbl.textContent = "MODO GAME ATIVO";
+      } else {
+        dot.className = "";
+        lbl.textContent = "AGUARDANDO";
+      }
+    } catch(e2) {}
+  } catch(e) {}
+  setTimeout(poll, 2000);
+}
+poll();
+// drag
+let ox=0,oy=0,drag=false;
+document.body.onmousedown = e => { drag=true; ox=e.screenX-window.screenX; oy=e.screenY-window.screenY; };
+document.onmouseup = () => drag=false;
+document.onmousemove = e => { if(drag) window.moveTo(e.screenX-ox, e.screenY-oy); };
+</script>
+</body>
+</html>

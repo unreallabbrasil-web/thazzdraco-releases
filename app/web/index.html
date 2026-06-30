@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="pt-BR" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="google" content="notranslate">
+<meta http-equiv="Content-Language" content="pt-BR">
+<title>ThazzDraco Optimizer</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<!-- banner de atualização (oculto até ter versão nova) -->
+<div id="updateBanner" class="update-banner hidden">
+  <span class="update-icon">⚡</span>
+  <div class="update-text">
+    <b>Atualização disponível</b> — v<span id="updateVersion"></span>
+    <span id="updateNotes" class="update-notes"></span>
+  </div>
+  <button class="btn-update" id="btnUpdateDownload">Baixar agora</button>
+  <button class="btn-dismiss-update" id="btnUpdateDismiss" title="Fechar">✕</button>
+</div>
+<!-- atmosfera -->
+<div class="bg-layers">
+  <div class="storm"></div>
+  <div class="gridfloor"></div>
+  <div class="particles" id="particles"></div>
+</div>
+
+<div class="app">
+  <span class="brk tl"></span><span class="brk tr"></span><span class="brk bl"></span><span class="brk br"></span>
+
+  <!-- ===== TOP HUD ===== -->
+  <header class="tophud">
+    <div class="brand">
+      <img src="logo.png" alt="" onerror="this.style.display='none'">
+      <div class="bmeta">
+        <b>DRACO // CORE</b>
+        <span id="hudStatus">Núcleo online · em espera</span>
+        <span class="build-ver" id="buildVer" title="Clique para reconstruir o app">v—</span>
+      </div>
+    </div>
+    <div class="hudright">
+      <div class="telem">
+        <div class="tcell ok"><b id="cAplicados">—</b><span>Aplicados</span></div>
+        <div class="tcell pn"><b id="cPendentes">—</b><span>Pendentes</span></div>
+        <div class="tcell op"><b id="cOportunidades">—</b><span>Extras</span></div>
+      </div>
+      <button class="iconbtn" id="btnHist" title="Histórico de otimizações"><span data-icon="history"></span></button>
+      <button class="iconbtn" id="btnBackup" title="Backup &amp; restauração"><span data-icon="backup"></span></button>
+      <button class="iconbtn" id="btnReport" title="Relatório do cliente"><span data-icon="doc"></span></button>
+      <button class="iconbtn" id="btnOverlay" title="Overlay minimalista — métricas em janela flutuante"><span data-icon="overlay"></span></button>
+      <button class="iconbtn" id="btnPerf" title="Modo performance (reduz efeitos)"><span data-icon="perf"></span></button>
+      <button class="iconbtn" id="btnRescan" title="Reescanear"><span data-icon="scan"></span></button>
+      <span class="badge" id="adminBadge"><span class="dot"></span> …</span>
+    </div>
+  </header>
+
+  <div class="noadmin" id="noadmin"><span data-icon="warn"></span> Rode como <b>administrador</b> para ativar os módulos. Feche e abra o ThazzDraco.exe com botão direito → "Executar como administrador".</div>
+
+  <!-- ===== PÁGINAS ===== -->
+  <main class="pages">
+    <!-- INÍCIO (Portal) -->
+    <section class="page active" id="page-inicio">
+      <div class="portal-stage">
+        <div class="rays"></div>
+        <div class="portal-haze"></div>
+        <svg class="lightning-svg" viewBox="0 0 560 560">
+          <path class="bolt b1" d="M280 280 L300 180 L286 168 L312 70"/>
+          <path class="bolt b2" d="M280 280 L392 250 L404 268 L498 238"/>
+          <path class="bolt b3" d="M280 280 L262 392 L246 384 L214 486"/>
+          <path class="bolt b4" d="M280 280 L168 300 L156 284 L66 312"/>
+          <path class="bolt b5" d="M280 280 L372 360 L390 354 L470 432"/>
+          <path class="bolt b6" d="M280 280 L196 206 L182 214 L96 150"/>
+        </svg>
+        <img class="dragon-hero" src="logo.png" alt="ThazzDraco" onerror="this.style.opacity=0">
+        <div class="gauge" id="gauge"></div>
+      </div>
+      <div class="hero-status">
+        <div class="status-kicker" id="kicker">núcleo · em espera</div>
+        <div class="hero-score" id="gNum">0</div>
+        <h1 id="statusTitle">Hora de acordar a máquina</h1>
+        <p class="sub" id="statusSub">Uma varredura profunda revela cada FPS preso no sistema. Clique em <b>Escanear PC</b>.</p>
+        <button class="btn-hero scan-cta" id="scanCta"><span data-icon="scan"></span> Escanear PC</button>
+      </div>
+
+      <div class="sys-strip" id="sysStrip"></div>
+
+      <div class="reboot" id="reboot">
+        <span class="ic" data-icon="warn"></span>
+        <div>Alguns módulos pedem <b>reinício</b> para efeito pleno.</div>
+        <button class="btn-reboot" id="btnReboot">Reiniciar agora</button>
+      </div>
+    </section>
+
+    <!-- OTIMIZAÇÕES -->
+    <section class="page" id="page-otimizacoes">
+      <div class="ptitle">Perfis rápidos · aplique um plano completo</div>
+      <div class="presets" id="presets"></div>
+      <div class="ptitle">Console de otimização</div>
+      <div class="reco-row reco-console" id="reco"></div>
+      <div class="subnav" id="subnav"></div>
+      <div class="otim-head">
+        <div><h2 id="otimTitle">Todas</h2><p class="otim-sub" id="otimSub"></p></div>
+        <button class="btnG" id="btnOtimSecao"><span data-icon="bolt"></span> Ativar seção</button>
+      </div>
+      <div class="search">
+        <span class="si" data-icon="search"></span>
+        <input id="search" placeholder="Buscar módulo…" autocomplete="off">
+      </div>
+      <div class="rules" id="otimRules"></div>
+    </section>
+
+    <!-- JOGOS -->
+    <section class="page" id="page-jogos">
+      <div class="ptitle">Otimização por jogo</div>
+      <p class="page-lead">Steam, Epic e outros launchers detectados automaticamente. Por jogo: <b>FSO off</b> (menos stutter/input lag), <b>GPU máx</b>, <b>CPU alta</b> e <b>Anti-vírus</b>. Ou <b>⚡ Tudo</b> num clique. Tudo <b>reversível</b>.</p>
+      <!-- F1: Modo Game ao Vivo -->
+      <div class="live-game-bar" id="liveGameBar">
+        <div class="lgb-left">
+          <span class="lgb-dot" id="lgbDot"></span>
+          <b>Modo Game ao Vivo</b>
+          <span id="lgbStatus" class="lgb-status">Desativado</span>
+        </div>
+        <div class="lgb-right">
+          <div id="lgbRunning" class="lgb-running"></div>
+          <label class="toggle" id="lgbToggle"><i></i></label>
+        </div>
+      </div>
+      <div class="jogos-bar">
+        <button class="abtn" id="btnExportJogos" title="Salvar config atual de todos os jogos como arquivo JSON">⬇ Exportar config</button>
+        <label class="abtn" for="inputImportJogos" style="cursor:pointer" title="Importar config de jogos de outro PC">⬆ Importar config</label>
+        <input type="file" id="inputImportJogos" accept=".json" style="display:none">
+      </div>
+      <div class="rules" id="jogosList"></div>
+      <div class="ptitle">Adicionar jogo manualmente</div>
+      <div class="game-add-box">
+        <p class="page-lead" style="margin-top:0">Jogo não detectado? Cole o caminho do <code>.exe</code> abaixo.</p>
+        <div class="game-add-row">
+          <input id="customGameExe" class="game-add-input" placeholder="C:\Games\MeuJogo\game.exe" autocomplete="off" spellcheck="false">
+          <input id="customGameName" class="game-add-input" placeholder="Nome (opcional)" style="max-width:220px" autocomplete="off">
+          <button class="btn-hero" id="btnAddGame" style="white-space:nowrap"><span data-icon="bolt"></span> Adicionar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MANUTENÇÃO (sub-abas) -->
+    <section class="page" id="page-manutencao">
+      <nav class="subtabs" id="subManut">
+        <button class="active" data-sub="limpeza"><span data-icon="broom"></span>Limpeza</button>
+        <button data-sub="reparo"><span data-icon="wrench"></span>Reparo</button>
+        <button data-sub="debloat"><span data-icon="trash"></span>Debloat</button>
+        <button data-sub="ferramentas"><span data-icon="sys"></span>Ferramentas</button>
+        <button data-sub="inicializacao"><span data-icon="rocket"></span>Inicialização</button>
+        <button data-sub="browsers"><span data-icon="shield"></span>Browsers</button>
+      </nav>
+
+      <div class="subpane" id="pane-mn-browsers">
+        <div class="ptitle">Limpeza por browser · cache, cookies e histórico</div>
+        <div class="repair-intro">
+          Remove dados acumulados de Chrome, Edge, Brave e Firefox: <b>cache</b> (libera espaço),
+          <b>cookies</b> (sessões e login), <b>histórico</b> e <b>sessões</b> salvas.
+          <span class="bench-note">Feche o browser antes de limpar. Cookies removem login — você precisará
+          entrar novamente nos sites.</span>
+        </div>
+        <div class="browser-bar">
+          <button class="btnG" id="btnBrowserScan"><span data-icon="scan"></span> Verificar browsers</button>
+          <span id="browserSummary" class="bench-note"></span>
+        </div>
+        <div id="browserGrid" class="browser-grid"></div>
+        <div class="repair-actions" id="browserActions" style="display:none">
+          <button class="btn-hero" id="btnBrowserClean"><span data-icon="broom"></span> Limpar selecionados</button>
+        </div>
+      </div>
+
+      <div class="subpane active" id="pane-mn-limpeza">
+        <div class="ptitle">Limpeza de temporários</div>
+        <div class="clean-card" id="cleanCard"></div>
+        <div class="clean-info">
+          <div class="ci-col ok">
+            <h4><span data-icon="check"></span> O que é apagado</h4>
+            <ul><li>Arquivos temporários do Windows e dos apps</li><li>Cache regenerável (<code>%TEMP%</code>, <code>Windows\Temp</code>)</li></ul>
+          </div>
+          <div class="ci-col no">
+            <h4><span data-icon="shield"></span> O que NUNCA é tocado</h4>
+            <ul><li>Documentos, Imagens, Downloads, Área de trabalho</li><li>Saves de jogos, dados de navegador, nada pessoal</li></ul>
+          </div>
+        </div>
+        <div class="ptitle">Limpeza profunda · cache, dumps e shaders</div>
+        <div class="repair-intro">
+          Vai além dos temporários: <b>cache de shaders</b> (libera espaço e corrige stutter), despejos de
+          erro, cache do Windows Update, miniaturas e <b>Windows.old</b> (a versão anterior do Windows —
+          dezenas de GB). <span class="bench-note">Tudo regenerável, nada de dados pessoais. Itens
+          sensíveis (Lixeira, Windows.old) vêm desmarcados e com aviso.</span>
+        </div>
+        <div class="deep-box" id="deepBox"></div>
+        <div class="repair-actions" id="deepActions" style="display:none">
+          <button class="btn-hero" id="btnDeep"><span data-icon="broom"></span> Limpar selecionados</button>
+        </div>
+      </div>
+
+      <div class="subpane" id="pane-mn-reparo">
+        <div class="ptitle">Reparo do Windows · deixar como recém-instalado</div>
+        <div class="repair-intro">
+          Conserta o Windows <b>sem formatar</b> e sem perder nada: verifica e repara arquivos do sistema
+          (SFC), repara a imagem do Windows (DISM), verifica o disco (CHKDSK) e reseta o Windows Update.
+          <span class="bench-note">São operações de reparo do próprio Windows — <b>não apagam dados</b>.
+          Pode levar de 5 a 30 min e precisa de administrador.</span>
+        </div>
+        <div class="repair-steps" id="repairSteps">
+          <label class="rep-chk"><input type="checkbox" value="sfc" checked> <span><b>SFC /scannow</b> — verifica e repara arquivos do sistema corrompidos</span></label>
+          <label class="rep-chk"><input type="checkbox" value="dism-restore" checked> <span><b>DISM RestoreHealth</b> — repara a imagem do Windows (precisa de internet)</span></label>
+          <label class="rep-chk"><input type="checkbox" value="dism-cleanup"> <span><b>DISM Cleanup</b> — remove componentes antigos e libera espaço (WinSxS)</span></label>
+          <label class="rep-chk"><input type="checkbox" value="chkdsk"> <span><b>CHKDSK /scan</b> — verifica o disco do sistema (online, sem reinício)</span></label>
+          <label class="rep-chk"><input type="checkbox" value="wureset"> <span><b>Resetar o Windows Update</b> — corrige updates travados (limpa o cache)</span></label>
+        </div>
+        <div class="repair-actions">
+          <button class="btn-hero" id="btnRepair"><span data-icon="wrench"></span> Iniciar reparo</button>
+        </div>
+        <div id="repairRun"></div>
+      </div>
+
+      <div class="subpane" id="pane-mn-debloat">
+        <div class="ptitle">Remover bloatware · apps inúteis de fábrica</div>
+        <div class="repair-intro">
+          Remove apps UWP <b>inúteis</b> (notícias/clima da MSN, jogos promocionais, Groove, Clipchamp…).
+          <span class="bench-note">Mostramos só o que é <b>seguro remover</b> — nunca tocamos em apps de
+          sistema. Reversível: dá pra reinstalar pela Microsoft Store. Apps do <b>Xbox</b> vêm desmarcados
+          (gamers costumam querer).</span>
+        </div>
+        <div class="bloat-box" id="bloatBox"></div>
+        <div class="repair-actions" id="bloatActions" style="display:none">
+          <button class="btn-hero" id="btnBloat"><span data-icon="broom"></span> Remover selecionados</button>
+        </div>
+      </div>
+
+      <div class="subpane" id="pane-mn-ferramentas">
+        <div class="ptitle">Ferramentas rápidas · do Manual Mestre</div>
+        <div class="repair-intro">
+          Ações pontuais e seguras de manutenção. <span class="bench-note">Nativas do Windows, reversíveis;
+          nenhuma toca em dados pessoais.</span>
+        </div>
+        <div class="tools-grid" id="toolsGrid"></div>
+
+        <!-- F11: Scanner de Serviços Pesados -->
+        <div class="ptitle" style="margin-top:28px">Scanner de Serviços</div>
+        <div class="repair-intro">Serviços do Windows que consomem CPU/RAM/rede sem benefício direto para jogos.
+          <span class="bench-note">Parar é temporário — voltam no próximo boot ou manualmente.</span>
+        </div>
+        <div class="svc-bar">
+          <button class="btnG" id="btnSvcScan">Verificar serviços</button>
+          <span id="svcSummary" class="bench-note"></span>
+        </div>
+        <div id="svcList"></div>
+
+        <!-- F12: Detecção de Drivers Desatualizados -->
+        <div class="ptitle" style="margin-top:28px">Auditoria de Drivers</div>
+        <div class="repair-intro">GPU, Áudio, Rede e Chipset — detecta drivers antigos que podem causar instabilidade.
+          <span class="bench-note">Sem internet; baseado na data de instalação local.</span>
+        </div>
+        <div class="svc-bar">
+          <button class="btnG" id="btnDriverAudit">Verificar drivers</button>
+          <span id="drvSummary" class="bench-note"></span>
+        </div>
+        <div id="drvList"></div>
+      </div>
+
+      <div class="subpane" id="pane-mn-inicializacao">
+        <div class="ptitle">Inicialização do Windows</div>
+        <p class="page-lead">Programas que sobem junto com o Windows. Desligue o que não precisa para acelerar o boot e liberar memória — <b>reversível</b>, igual ao Gerenciador de Tarefas (nada é apagado).</p>
+        <div class="startup-head" id="startupHead"></div>
+        <div class="rules" id="startupList"></div>
+      </div>
+    </section>
+
+    <!-- HISTÓRICO -->
+    <section class="page" id="page-historico">
+      <!-- F5: Histórico de Performance -->
+      <div class="ptitle">Histórico de performance</div>
+      <div class="perf-hist-box">
+        <div class="ph-stats">
+          <div class="ph-stat"><span class="ph-lbl">CPU</span><b id="phCpu">—</b></div>
+          <div class="ph-stat"><span class="ph-lbl">RAM</span><b id="phRam">—</b></div>
+          <div class="ph-stat"><span class="ph-lbl">GPU</span><b id="phGpu">—</b></div>
+          <div class="ph-stat"><span class="ph-lbl">Temp</span><b id="phTemp">—</b></div>
+          <div class="ph-legend">
+            <span class="ph-dot" style="background:#41c7ff"></span>CPU
+            <span class="ph-dot" style="background:#ffa030"></span>RAM
+            <span class="ph-dot" style="background:#00c47a"></span>GPU
+          </div>
+          <button class="abtn ph-clear" id="btnPerfClear" title="Limpar histórico">Limpar</button>
+        </div>
+        <canvas id="perfChartCanvas" class="perf-chart-canvas"></canvas>
+      </div>
+
+      <div class="ptitle" style="margin-top:24px">Histórico de lotes</div>
+      <div class="hist-head">
+        <p class="otim-sub">Cada ativação cria um lote reversível.</p>
+        <button class="btn-danger2" id="btnUndoAll"><span data-icon="undo"></span> Desfazer tudo</button>
+      </div>
+      <div class="hist" id="histList"></div>
+    </section>
+
+    <!-- MEDIÇÃO (sub-abas: desempenho / fps / benchmark) -->
+    <section class="page" id="page-medicao">
+      <nav class="subtabs" id="subMed">
+        <button class="active" data-sub="desempenho"><span data-icon="activity"></span>Desempenho</button>
+        <button data-sub="fps"><span data-icon="game"></span>FPS no jogo</button>
+        <button data-sub="benchmark"><span data-icon="gauge"></span>Benchmark</button>
+      </nav>
+
+      <div class="subpane active" id="pane-md-desempenho">
+        <div class="ptitle">Desempenho ao vivo</div>
+        <div class="perf-top" id="perfTop"></div>
+        <div class="mem-detail" id="memDetail"></div>
+        <div class="ptitle">Saúde do PC</div>
+        <div class="health-box" id="healthBox"></div>
+
+        <div class="ptitle">Saúde térmica · teste de estresse</div>
+        <div class="repair-intro">
+          Estressa a GPU ao máximo e mede a <b>temperatura de pico</b> e se ela entra em
+          <b>throttling térmico</b> (reduz o clock por calor = perde FPS). <span class="bench-note">Temperatura
+          real via NVIDIA/NVML; em AMD/Intel medimos o uso (a temperatura exige sensor do fabricante). A CPU
+          não é medida aqui — use HWiNFO se precisar.</span>
+        </div>
+        <div class="thermal-actions">
+          <button class="btn-hero" id="btnThermal"><span data-icon="gauge"></span> Rodar teste térmico (~25s)</button>
+          <button class="btnG" id="btnUndervolt"><span data-icon="bolt"></span> Guia de undervolt</button>
+        </div>
+        <div id="thermalResult"></div>
+
+        <div class="ptitle">Processos mais pesados (memória)</div>
+        <div class="proc-list" id="procList"></div>
+      </div>
+
+      <div class="subpane" id="pane-md-fps">
+        <div class="ptitle">FPS real · medir ganho no jogo</div>
+        <div class="bench-intro">
+          Mede o <b>FPS de verdade</b> de qualquer jogo via <b>PresentMon</b> (ETW da Microsoft) —
+          <b>sem hook nem injeção</b>, não toma ban. Veja <b>FPS médio</b>, <b>1% low</b> e <b>0.1% low</b>
+          (a fluidez real, onde mora o engasgo). Meça <b>antes</b>, otimize, e meça <b>depois</b> para
+          provar o ganho (ex.: 70 → 120 FPS). <span class="bench-note">Abra o jogo, escolha-o abaixo,
+          clique em medir e <b>jogue normalmente</b> durante a captura.</span>
+        </div>
+        <div class="fps-setup">
+          <div class="fps-field">
+            <label>Jogo (processo)</label>
+            <div class="fps-pickrow">
+              <select id="fpsGame"></select>
+              <button class="iconbtn" id="fpsRefresh" title="Atualizar lista de jogos"><span data-icon="refresh"></span></button>
+            </div>
+            <input id="fpsManual" placeholder="…ou digite o .exe (ex.: cod.exe)" autocomplete="off">
+          </div>
+          <div class="fps-field fps-dur">
+            <label>Duração</label>
+            <div class="fps-durs" id="fpsDurs">
+              <button class="fps-dchip" data-dur="15">15s</button>
+              <button class="fps-dchip active" data-dur="30">30s</button>
+              <button class="fps-dchip" data-dur="60">60s</button>
+            </div>
+          </div>
+          <button class="btn-hero" id="btnFps"><span data-icon="gauge"></span> Medir FPS</button>
+        </div>
+        <div class="bench-actions">
+          <button class="btnG" id="btnFpsBase" title="Guarda este resultado como referência 'antes'">Marcar como “antes”</button>
+          <button class="btnG" id="btnFpsClear" title="Limpa a referência">Limpar antes</button>
+        </div>
+        <div class="bench-run" id="fpsRun"></div>
+        <div id="fpsResult"></div>
+      </div>
+
+      <div class="subpane" id="pane-md-benchmark">
+        <div class="ptitle">Benchmark · estresse de CPU + GPU</div>
+        <div class="bench-intro">
+          Teste de estresse real: martela a <b>GPU</b> (renderização WebGL sob carga máxima, com
+          temperatura/uso ao vivo) e a <b>CPU</b> (todos os núcleos), além de <b>memória</b> (GB/s) e
+          <b>disco</b> (MB/s). Rode <b>antes</b> de otimizar, aplique as melhorias (ou feche apps
+          pesados) e rode <b>depois</b> para ver o ganho. <span class="bench-note">Dura ~16s. Não use o
+          PC durante o teste — a GPU vai a 100% e esquenta (é esperado).</span>
+        </div>
+        <div class="bench-actions">
+          <button class="btn-hero" id="btnBench"><span data-icon="activity"></span> Rodar estresse</button>
+          <button class="btnG" id="btnBenchBase" title="Guarda este resultado como referência 'antes'">Marcar como “antes”</button>
+          <button class="btnG" id="btnBenchClear" title="Limpa a referência">Limpar antes</button>
+        </div>
+        <div class="bench-run" id="benchRun"></div>
+        <div class="bench-grid" id="benchGrid"></div>
+      </div>
+    </section>
+
+    <!-- DIAGNÓSTICO DE GARGALOS -->
+    <section class="page" id="page-diagnostico">
+      <div class="ptitle">Diagnóstico · o que segura seu FPS</div>
+      <div class="bench-intro">
+        Cruza o hardware e a configuração do PC para achar os <b>gargalos reais</b> que custam FPS —
+        XMP/EXPO desligado, jogo num HD mecânico, monitor abaixo da taxa máxima, HAGS, plano de
+        energia e mais. <span class="bench-note">Cada achado mostra o que foi medido e como corrigir
+        — alguns com <b>1 clique</b>, outros explicam o passo na BIOS/Windows.</span>
+      </div>
+      <div class="bench-actions">
+        <button class="btn-hero" id="btnDiag"><span data-icon="diag"></span> Rodar diagnóstico</button>
+        <div class="diag-summary" id="diagSummary"></div>
+      </div>
+      <div class="diag-driver" id="diagDriver"></div>
+      <div class="diag-list" id="diagList"></div>
+    </section>
+
+    <!-- GPU PANEL -->
+    <section class="page" id="page-gpu">
+      <div class="ptitle">GPU · Status e Configurações</div>
+      <div class="bench-intro">
+        Monitora e controla sua GPU em tempo real. <b>NVIDIA</b>: ajuste o power limit e veja temperatura, uso e clock.
+        <b>AMD</b>: métricas ao vivo + guia das configurações do Adrenalin. <span class="bench-note">Power limit via nvidia-smi requer administrador.</span>
+      </div>
+      <div id="gpuLive"></div>
+      <div id="nvPanel"></div>
+      <div class="ptitle" style="margin-top:24px">Otimizações de GPU · do Motor de Regras</div>
+      <p class="page-lead">As regras abaixo ficam também na aba Otimizações → GPU & Tela. São atalhos para as mais impactantes.</p>
+      <div id="gpuRules"></div>
+    </section>
+  </main>
+
+  <!-- ===== HUD DE COMANDO (navegação) ===== -->
+  <nav class="cmd mainnav" id="mainnav">
+    <a class="cn active" data-page="inicio"><span class="ic" data-icon="home"></span><span class="l">Núcleo</span></a>
+    <a class="cn" data-page="diagnostico"><span class="ic" data-icon="diag"></span><span class="l">Diagnóstico</span></a>
+    <a class="cn" data-page="otimizacoes"><span class="ic" data-icon="bolt"></span><span class="b" id="navOtim"></span><span class="l">Otimizações</span></a>
+    <a class="cn" data-page="jogos"><span class="ic" data-icon="gamepad"></span><span class="l">Jogos</span></a>
+    <a class="cn" data-page="gpu"><span class="ic" data-icon="gpu"></span><span class="l">GPU</span></a>
+    <a class="cn" data-page="manutencao"><span class="ic" data-icon="wrench"></span><span class="l">Manutenção</span></a>
+    <a class="cn" data-page="medicao"><span class="ic" data-icon="activity"></span><span class="l">Medição</span></a>
+  </nav>
+</div>
+
+<!-- ===== OVERLAYS ===== -->
+<div class="overlay" id="modal">
+  <div class="modal">
+    <div class="mhead"><h3 id="mTitle">Confirmar</h3><button class="x" data-close>×</button></div>
+    <div class="mbody" id="mBody"></div>
+    <div class="mfoot" id="mFoot"></div>
+  </div>
+</div>
+<div class="busy" id="busy"><div class="ring" data-icon="ring"></div><div class="msg" id="busyMsg">Processando…</div></div>
+
+<!-- ===== CERIMÔNIA DE SCAN ===== -->
+<div class="scan-overlay" id="scanOverlay">
+  <div class="scan-stage">
+    <div class="scan-rings"><i></i><i></i><i></i></div>
+    <div class="scan-sweep"></div>
+    <img src="logo.png" alt="" onerror="this.style.display='none'">
+  </div>
+  <div class="scan-kicker">DRACO // DIAGNÓSTICO</div>
+  <div class="scan-title" id="scanTitle">Rastreando gargalos</div>
+  <div class="scan-steps" id="scanSteps"></div>
+  <div class="scan-progress"><i id="scanBar"></i></div>
+  <div class="scan-result" id="scanResult"></div>
+</div>
+
+<div class="energy-pulse" id="energyPulse"></div>
+<div class="toasts" id="toasts"></div>
+
+<!-- ===== RELATÓRIO DO CLIENTE ===== -->
+<div class="report-overlay" id="reportOverlay">
+  <div class="report-bar">
+    <input id="reportClient" placeholder="Nome do cliente (opcional)" autocomplete="off">
+    <label class="mbtn" id="reportLogoBtn" title="Logo do cliente (opcional)">Logo do cliente<input type="file" id="reportLogo" accept="image/*" hidden></label>
+    <button class="mbtn" id="reportClose">Fechar</button>
+    <button class="mbtn primary" id="reportPrint"><span data-icon="print"></span> Salvar PDF / Imprimir</button>
+  </div>
+  <div class="report-scroll"><div class="report-paper" id="reportArea"></div></div>
+</div>
+
+<!-- ===== Painel por jogo ===== -->
+<div id="gamePanelBg" class="game-panel-bg" onclick="closeGamePanel()"></div>
+<div id="gamePanel" class="game-panel" role="dialog" aria-label="Configurações do jogo">
+  <button class="gp-close" onclick="closeGamePanel()" aria-label="Fechar">&times;</button>
+  <div id="gpContent" class="gp-content"></div>
+</div>
+
+<script src="icons.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

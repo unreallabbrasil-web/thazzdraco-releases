@@ -1,0 +1,71 @@
+name: Build & Release
+
+# Dispara APENAS quando o arquivo VERSION muda na main.
+# Para lançar uma versão nova: mude o VERSION, faça git push.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/VERSION'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: app/go.sum
+
+      - name: Ler versão
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Get-Content app/VERSION).Trim()
+          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
+          echo "Versão: $v"
+
+      - name: Build ThazzDraco.exe
+        working-directory: app
+        shell: pwsh
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-H windowsgui -s -w" -o ThazzDraco.exe .
+          Write-Host "Build concluido: $(Get-Item ThazzDraco.exe | Select-Object -ExpandProperty Length) bytes"
+
+      - name: Criar Release no GitHub
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ steps.ver.outputs.VERSION }}"
+          $tag = "v$version"
+
+          # Notas de release: lê CHANGELOG.md se existir, senão usa mensagem padrão
+          $notes = "ThazzDraco Optimizer v$version"
+          if (Test-Path "CHANGELOG.md") {
+            $notes = Get-Content "CHANGELOG.md" -Raw
+          }
+
+          # Remove release anterior com a mesma tag, se houver
+          gh release delete $tag --yes 2>$null
+
+          # Cria o release com o .exe
+          gh release create $tag `
+            --title "ThazzDraco Optimizer v$version" `
+            --notes $notes `
+            --latest `
+            "app/ThazzDraco.exe#ThazzDraco.exe"
+
+          Write-Host "Release $tag criado com sucesso!"

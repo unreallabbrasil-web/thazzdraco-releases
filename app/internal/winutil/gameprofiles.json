@@ -1,0 +1,152 @@
+{
+  "_nota": "Perfis curados por título. Dicas são recomendações aplicadas no MENU do próprio jogo (não editamos config de jogos com anti-cheat). Edite à vontade com seus settings testados.",
+  "perfis": [
+    {
+      "id": "valorant", "nome": "VALORANT", "tipo": "FPS competitivo",
+      "match": ["valorant"],
+      "dicas": [
+        "Limite de FPS: ligue 'Limitar FPS sempre' em ~2x a taxa do monitor (ex.: 240+ num 144 Hz)",
+        "Qualidade de Material/Textura/Detalhe: Baixo",
+        "Anti-Aliasing: MSAA 2x (ou Nenhum em PC fraco) · Filtragem Anisotrópica: 1x",
+        "Vsync: Desligado · Bloom, Distorção, Sombras de Elenco, First Person Shadows: Desligado",
+        "NVIDIA Reflex: Ligado + Boost (reduz o input lag de verdade)"
+      ],
+      "notas": "Anti-cheat Vanguard: ajuste tudo pelo menu do VALORANT — nunca por arquivos.",
+      "tweaks": "Prioridade alta de CPU e FSO off ajudam. Em notebook, garanta a GPU dedicada."
+    },
+    {
+      "id": "cs2", "nome": "Counter-Strike 2", "tipo": "FPS competitivo",
+      "match": ["cs2", "counterstrike", "csgo"],
+      "dicas": [
+        "fps_max 0 (sem limite) ou fixo acima da taxa do monitor",
+        "Modo de exibição: Tela cheia · Resolução nativa (evite esticar muito)",
+        "Sombras: Baixo/Médio · Detalhe de Modelos/Texturas: Baixo · Efeitos: Baixo",
+        "NVIDIA Reflex Low Latency: Ligado · Multicore Rendering: Ligado",
+        "Boost Player Contrast: Ligado (vê inimigos melhor)"
+      ],
+      "tweaks": "FSO off + prioridade alta ajudam na consistência (1% low)."
+    },
+    {
+      "id": "fortnite", "nome": "Fortnite", "tipo": "Battle Royale",
+      "match": ["fortnite"],
+      "dicas": [
+        "Modo de Renderização: Performance (libera MUITO FPS em PC fraco)",
+        "Limite de FPS: o máximo que o PC segura estável · Vsync: Desligado",
+        "Sombras, Pós-processamento, Efeitos: Baixo/Desligado · Anti-Aliasing: Desligado/TAA",
+        "NVIDIA Reflex Low Latency: Ligado + Boost",
+        "Latência de Renderização: priorize 'NVIDIA Reflex' em vez de buffer alto"
+      ],
+      "notas": "Anti-cheat Easy Anti-Cheat: ajuste pelo menu do jogo.",
+      "tweaks": "GPU máx + FSO off recomendados."
+    },
+    {
+      "id": "cod", "nome": "Call of Duty (Warzone/MW)", "tipo": "FPS / Battle Royale",
+      "match": ["callofduty", "warzone", "modernwarfare", "cod"],
+      "dicas": [
+        "Vsync: Desligado · Limite de FPS personalizado um pouco abaixo do pico (frametime estável)",
+        "Qualidade de Textura/Detalhe: Baixo/Médio · VRAM: não estoure (cause stutter)",
+        "Ray Tracing: Desligado · Motion Blur (câmera e arma): Desligado · Film Grain: 0",
+        "NVIDIA Reflex Low Latency: Ligado + Boost",
+        "Cache de shaders: refaça após atualização grande (evita stutter)"
+      ],
+      "notas": "Anti-cheat Ricochet: só ajuste no menu do jogo.",
+      "tweaks": "Excluir a pasta do antivírus reduz stutter de I/O; FSO off + GPU máx."
+    },
+    {
+      "id": "apex", "nome": "Apex Legends", "tipo": "Battle Royale",
+      "match": ["apexlegends", "apex"],
+      "dicas": [
+        "Vsync: Desligado · Limite de FPS via launch option (+fps_max) acima da taxa do monitor",
+        "Sombras/Modelos/Efeitos: Baixo · Anti-Aliasing: TSAA ou Desligado",
+        "Sun Shadow Coverage/Detail: Baixo (custa muito FPS) · Volumetric Lighting: Desligado",
+        "Ambient Occlusion: Desligado",
+        "NVIDIA Reflex: Ligado (se disponível)"
+      ],
+      "tweaks": "FSO off + prioridade alta. Excluir do antivírus ajuda no carregamento."
+    },
+    {
+      "id": "pubg", "nome": "PUBG: Battlegrounds", "tipo": "Battle Royale",
+      "match": ["pubg", "battlegrounds", "tslgame"],
+      "dicas": [
+        "Limite de FPS: Ilimitado · Vsync/Motion Blur: Desligado",
+        "Texturas: Médio (visão de inimigos) · resto Muito Baixo",
+        "Pós-processamento, Sombras, Efeitos, Folhagem: Muito Baixo",
+        "Distância de Visão: Médio/Alto (ver inimigos longe)",
+        "Sharpen: Ligado"
+      ],
+      "tweaks": "FSO off + GPU máx + prioridade alta combinam bem aqui."
+    },
+    {
+      "id": "lol", "nome": "League of Legends", "tipo": "MOBA",
+      "match": ["leagueoflegends", "lol"],
+      "dicas": [
+        "Limite de Quadros: 'Sem Limite' (ou acima da taxa do monitor)",
+        "Qualidade de Sombra/Efeitos/Ambiente: Baixo · Espera Vertical (Vsync): Desligado",
+        "Anti-Aliasing: Desligado",
+        "Movimento de Personagem com Qualidade: pode deixar — é leve",
+        "Feche o cliente da Riot durante a partida (libera RAM/CPU)"
+      ],
+      "tweaks": "Jogo leve — o maior ganho vem de fechar apps de fundo e prioridade alta."
+    },
+    {
+      "id": "overwatch", "nome": "Overwatch 2", "tipo": "FPS",
+      "match": ["overwatch"],
+      "dicas": [
+        "Limitar FPS: Personalizado, ~2x a taxa do monitor · Vsync/Triple Buffering: Desligado",
+        "Qualidade de Renderização: 100% · Texturas/Efeitos/Sombras: Baixo",
+        "Detalhe de Modelo/Efeito: Baixo · Reflexos Locais: Desligado",
+        "Reduzir Buffering: Ligado (menos input lag)",
+        "NVIDIA Reflex: Ligado"
+      ],
+      "tweaks": "FSO off + prioridade alta. GPU dedicada essencial em notebook."
+    },
+    {
+      "id": "r6", "nome": "Rainbow Six Siege", "tipo": "FPS tático",
+      "match": ["rainbowsix", "siege", "rainbow6"],
+      "dicas": [
+        "Limite de FPS: acima da taxa do monitor · Vsync: Desligado",
+        "Renderização: 100% (não use upscaling que borra) · Texturas: Médio",
+        "Sombras/Reflexos/Ambient Occlusion: Baixo/Desligado",
+        "Lens Effects/Zoom-in Depth of Field: Desligado",
+        "API: Vulkan costuma render mais FPS que DX11"
+      ],
+      "tweaks": "FSO off + prioridade alta ajudam no 1% low."
+    },
+    {
+      "id": "battlefield", "nome": "Battlefield", "tipo": "FPS",
+      "match": ["battlefield"],
+      "dicas": [
+        "Vsync: Desligado · Limite de FPS estável (frametime liso em 64/128 jogadores)",
+        "Qualidade de Textura: Médio/Ultra (se a VRAM aguentar) · resto Baixo",
+        "Motion Blur, Chromatic Aberration, Film Grain, Lens Distortion: Desligado",
+        "Ambient Occlusion (HBAO): Desligado · Future Frame Rendering: Ligado",
+        "NVIDIA Reflex (BF mais novos): Ligado"
+      ],
+      "tweaks": "RAM rápida (XMP) importa muito aqui — CPU-bound em mapas cheios."
+    },
+    {
+      "id": "gta", "nome": "Grand Theft Auto V", "tipo": "Mundo aberto",
+      "match": ["gta", "grandtheftauto"],
+      "dicas": [
+        "Vsync: Desligado · MSAA: Desligado (caríssimo) · FXAA: Ligado",
+        "População/Variedade: médio · Distância de Detalhe: ao gosto",
+        "Reflexos/Sombras: Normal · Pós-FX: Normal · Motion Blur: Desligado",
+        "Use limite de FPS externo se houver micro-stutter",
+        "Em GTA Online, não estoure a VRAM (causa stutter)"
+      ],
+      "tweaks": "Jogo num SSD reduz muito o stutter de streaming de texturas."
+    },
+    {
+      "id": "rocketleague", "nome": "Rocket League", "tipo": "Esporte",
+      "match": ["rocketleague"],
+      "dicas": [
+        "Vsync: Desligado · Limite de FPS: Sem limite (ou acima da taxa do monitor)",
+        "Qualidade de Renderização: Alta Performance · Detalhe: Baixo",
+        "Efeitos (partículas, luz dinâmica, lens flare): Desligado",
+        "Anti-Aliasing: Desligado · Sombras: Desligado",
+        "Weather Effects: Desligado"
+      ],
+      "tweaks": "Jogo leve — prioridade alta e GPU máx garantem FPS travado no teto."
+    }
+  ]
+}

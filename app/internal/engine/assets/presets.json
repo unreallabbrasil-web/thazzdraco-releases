@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "descricao": "Perfis curados: conjuntos de regras aplicados de uma vez. Ids devem existir em rules.json. So entram regras acionaveis; o executor pula o que ja esta aplicado ou nao se aplica (gate).",
+  "presets": [
+    {
+      "id": "equilibrado",
+      "nome": "Equilibrado",
+      "descricao": "Ganhos seguros, sem efeitos colaterais. Recomendado para a maioria.",
+      "ids": [
+        "power.high-performance", "win.game-mode", "win.game-dvr-off", "win.app-capture-off",
+        "win.gpu-scheduling-hags", "win.visual-effects-performance", "win.transparency-off",
+        "input.mouse-acceleration-off", "net.delivery-optimization-off", "svc.diagtrack-off",
+        "svc.useless-off", "win.copilot-off", "win.cortana-off", "win.widgets-off",
+        "win.taskbar-search-off", "win.sticky-keys-off", "net.smb1-off",
+        "browser.edge-telemetry-off", "browser.chrome-telemetry-off", "win.office-telemetry-off"
+      ]
+    },
+    {
+      "id": "competitivo",
+      "nome": "Competitivo",
+      "descricao": "Maxima resposta e FPS para jogos competitivos (FPS/MOBA). Inclui tweaks amarelos.",
+      "ids": [
+        "power.high-performance", "power.processor-max-performance", "power.usb-selective-suspend-off",
+        "power.power-throttling-off", "win.game-mode", "win.game-dvr-off", "win.app-capture-off",
+        "win.gpu-scheduling-hags", "win.visual-effects-performance", "win.transparency-off",
+        "input.mouse-acceleration-off", "reg.system-responsiveness", "reg.network-throttling-off",
+        "reg.games-task-priority", "reg.timer-resolution", "cpu.priority-separation",
+        "net.delivery-optimization-off", "net.nagle-off", "net.tcp-params",
+        "svc.diagtrack-off", "svc.useless-off", "win.copilot-off", "win.cortana-off",
+        "win.phone-link-off", "win.widgets-off", "win.taskbar-search-off", "win.sticky-keys-off",
+        "win.onedrive-off", "net.smb1-off", "browser.edge-telemetry-off",
+        "browser.chrome-telemetry-off", "win.office-telemetry-off"
+      ]
+    },
+    {
+      "id": "streaming",
+      "nome": "Streaming",
+      "descricao": "Desempenho mantendo rede e captura estaveis para quem transmite (evita mexer no upload).",
+      "ids": [
+        "power.high-performance", "power.processor-max-performance", "win.game-mode",
+        "win.gpu-scheduling-hags", "win.visual-effects-performance", "win.transparency-off",
+        "input.mouse-acceleration-off", "reg.system-responsiveness", "reg.games-task-priority",
+        "net.delivery-optimization-off", "svc.diagtrack-off", "svc.useless-off",
+        "win.copilot-off", "win.cortana-off", "win.widgets-off", "win.taskbar-search-off",
+        "win.sticky-keys-off", "browser.edge-telemetry-off", "win.office-telemetry-off"
+      ]
+    }
+  ]
+}

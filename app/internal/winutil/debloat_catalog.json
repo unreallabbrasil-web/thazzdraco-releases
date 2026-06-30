@@ -1,0 +1,47 @@
+{
+  "_nota": "Catálogo curado de bloatware UWP REMOVÍVEL com segurança. Casamento por NOME EXATO de pacote (nunca substring — evita pegar componentes do sistema como PeopleExperienceHost/XboxGameCallableUI). recomendado=true vem pré-marcado. Apps úteis (Calculadora, Fotos, Snipping Tool, Sticky Notes, Terminal, etc.) NÃO entram aqui de propósito.",
+  "apps": [
+    { "name": "Microsoft.BingNews", "nome": "Notícias (MSN)", "categoria": "Notícias & Bing", "recomendado": true },
+    { "name": "Microsoft.BingWeather", "nome": "Clima (MSN)", "categoria": "Notícias & Bing", "recomendado": true },
+    { "name": "Microsoft.BingFinance", "nome": "Finanças (MSN)", "categoria": "Notícias & Bing", "recomendado": true },
+    { "name": "Microsoft.BingSports", "nome": "Esportes (MSN)", "categoria": "Notícias & Bing", "recomendado": true },
+    { "name": "Microsoft.BingSearch", "nome": "Pesquisa Bing (web)", "categoria": "Notícias & Bing", "recomendado": true },
+
+    { "name": "Microsoft.ZuneMusic", "nome": "Groove Música / Media Player", "categoria": "Mídia", "recomendado": true },
+    { "name": "Microsoft.ZuneVideo", "nome": "Filmes e TV", "categoria": "Mídia", "recomendado": true },
+    { "name": "Clipchamp.Clipchamp", "nome": "Clipchamp (editor de vídeo)", "categoria": "Mídia", "recomendado": true },
+
+    { "name": "Microsoft.MicrosoftSolitaireCollection", "nome": "Coleção de Paciência", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "king.com.CandyCrushSaga", "nome": "Candy Crush Saga", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "king.com.CandyCrushSodaSaga", "nome": "Candy Crush Soda", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "king.com.BubbleWitch3Saga", "nome": "Bubble Witch 3", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "SpotifyAB.SpotifyMusic", "nome": "Spotify (atalho de fábrica)", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "Disney.37853FC22B2CE", "nome": "Disney+ (atalho)", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "BytedancePte.Ltd.TikTok", "nome": "TikTok (atalho)", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "Facebook.Instagram", "nome": "Instagram (atalho)", "categoria": "Jogos & promoções", "recomendado": true },
+    { "name": "5319275A.WhatsAppDesktop", "nome": "WhatsApp (da Store, atalho)", "categoria": "Jogos & promoções", "recomendado": false },
+
+    { "name": "Microsoft.Microsoft3DViewer", "nome": "Visualizador 3D", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.Print3D", "nome": "Impressão 3D", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.MixedReality.Portal", "nome": "Portal de Realidade Mista", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.GetHelp", "nome": "Obter Ajuda", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.Getstarted", "nome": "Dicas", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.WindowsFeedbackHub", "nome": "Hub de Comentários", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.MicrosoftOfficeHub", "nome": "“Obter Office” (anúncio)", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.OneConnect", "nome": "Wi-Fi Pago / Móvel", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.PowerAutomateDesktop", "nome": "Power Automate", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.Todos", "nome": "Microsoft To Do", "categoria": "Inúteis do Windows", "recomendado": false },
+    { "name": "Microsoft.SkypeApp", "nome": "Skype", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.People", "nome": "Pessoas (Contatos)", "categoria": "Inúteis do Windows", "recomendado": true },
+    { "name": "Microsoft.WindowsMaps", "nome": "Mapas do Windows", "categoria": "Inúteis do Windows", "recomendado": false },
+
+    { "name": "Microsoft.YourPhone", "nome": "Vínculo com o Telefone", "categoria": "Opcionais (verifique antes)", "recomendado": false, "nota": "Alguns usam para espelhar o celular." },
+    { "name": "Microsoft.windowscommunicationsapps", "nome": "Email e Calendário", "categoria": "Opcionais (verifique antes)", "recomendado": false, "nota": "Remova só se o cliente não usa o app Email." },
+
+    { "name": "Microsoft.GamingApp", "nome": "App Xbox", "categoria": "Xbox (cuidado com gamers)", "recomendado": false, "nota": "É o app do Xbox/Game Pass — não remova se o cliente joga via Game Pass." },
+    { "name": "Microsoft.XboxGamingOverlay", "nome": "Xbox Game Bar (overlay)", "categoria": "Xbox (cuidado com gamers)", "recomendado": false, "nota": "Alguns jogadores usam para FPS/gravação; outros desligam para reduzir overhead." },
+    { "name": "Microsoft.XboxIdentityProvider", "nome": "Login do Xbox", "categoria": "Xbox (cuidado com gamers)", "recomendado": false, "nota": "Necessário para login do Xbox/Game Pass — só remova se não usa." },
+    { "name": "Microsoft.Xbox.TCUI", "nome": "Xbox TCUI", "categoria": "Xbox (cuidado com gamers)", "recomendado": false },
+    { "name": "Microsoft.XboxSpeechToTextOverlay", "nome": "Xbox legendas de voz", "categoria": "Xbox (cuidado com gamers)", "recomendado": false }
+  ]
+}
