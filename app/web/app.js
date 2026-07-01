@@ -3197,13 +3197,10 @@ function renderDriverAuditRows(drivers, wuaUpdates) {
     } else if (match) {
       comUpdate++;
       action = `<button class="drv-update-btn" data-wuaid="${escHtml(match.id)}">${IC("update")} Atualizar${match.tamanho_mb ? " (" + fmtCleanMB(match.tamanho_mb) + ")" : ""}</button>`;
-    } else if (d.cat === "GPU" && /nvidia/i.test(d.nome)) {
-      action = `<button class="drv-nvlink-sm" data-nvlink2="${escHtml(d.nome)}">Ver na NVIDIA →</button>`;
     } else {
-      // Windows Update raramente cataloga driver de GPU/áudio/rede (fabricantes
-      // distribuem pelo app próprio deles) — em vez de beco sem saída, busca de
-      // verdade no site do fabricante certo (ou busca geral como último recurso).
-      action = `<button class="drv-nvlink-sm" data-drvsearch="${escHtml(d.nome)}">Buscar driver mais recente →</button>`;
+      // Honesto: o Windows Update não tem essa atualização catalogada. Sem
+      // link de busca — não abrimos navegador nem fingimos automação que não existe.
+      action = `<span class="drv-noauto">Sem atualização automática disponível</span>`;
     }
     return `<div class="drv-row">
       <div class="drv-meta">
@@ -3219,37 +3216,11 @@ function renderDriverAuditRows(drivers, wuaUpdates) {
   if (sum) {
     if (wuaUpdates === null) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · verificando atualizações reais…`;
     else sum.textContent = comUpdate
-      ? `${comUpdate} atualização${comUpdate === 1 ? "" : "ões"} real${comUpdate === 1 ? "" : "is"} encontrada${comUpdate === 1 ? "" : "s"}`
-      : "Nenhuma atualização real encontrada agora pelo Windows Update";
+      ? `${comUpdate} atualização${comUpdate === 1 ? "" : "ões"} real${comUpdate === 1 ? "" : "is"} encontrada${comUpdate === 1 ? "" : "s"} pelo Windows Update`
+      : "O Windows Update não tem atualização automática pra nenhum driver agora — cobertura dele é limitada (GPU/áudio raramente aparecem ali).";
   }
 
   $$("#drvList [data-wuaid]").forEach((btn) => { btn.onclick = () => installSingleDriverUpdate(btn); });
-  $$("#drvList [data-nvlink2]").forEach((btn) => {
-    btn.onclick = async () => {
-      const nome = btn.dataset.nvlink2;
-      btn.disabled = true; const orig = btn.textContent; btn.textContent = "Procurando…";
-      try {
-        const r = await api("/api/drivers/nvidia-link?nome=" + encodeURIComponent(nome));
-        if (r.ok) window.open(r.url, "_blank");
-        else toast("warn", "Não achei essa placa no catálogo da NVIDIA", r.erro || "");
-      } catch (e) { toast("err", "Falha", e.message); }
-      finally { btn.disabled = false; btn.textContent = orig; }
-    };
-  });
-  $$("#drvList [data-drvsearch]").forEach((btn) => {
-    btn.onclick = () => window.open(driverSearchURL(btn.dataset.drvsearch), "_blank");
-  });
-}
-
-// Windows Update raramente tem driver de GPU/áudio/rede catalogado (os
-// fabricantes distribuem pelo app próprio deles) — quando não achamos update
-// real, manda pra um lugar de verdade em vez de deixar a linha sem ação.
-// AMD/Intel têm página oficial de driver; o resto cai numa busca direta.
-function driverSearchURL(nome) {
-  const n = (nome || "").toLowerCase();
-  if (/\bamd\b|\bradeon\b|\bati\b/.test(n)) return "https://www.amd.com/en/support/download/drivers.html";
-  if (/\bintel\b/.test(n)) return "https://www.intel.com/content/www/us/en/support/detect.html";
-  return "https://www.bing.com/search?q=" + encodeURIComponent(nome + " driver download");
 }
 
 function installSingleDriverUpdate(btn) {
