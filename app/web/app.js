@@ -1429,15 +1429,9 @@ function wire() {
   const btnSvc = $("#btnSvcScan");
   if (btnSvc) btnSvc.onclick = runServiceScan;
 
-  // F12: Auditoria de Drivers (visão por idade)
+  // F12: Atualização de Drivers (lista + checagem real por driver)
   const btnDrv = $("#btnDriverAudit");
   if (btnDrv) btnDrv.onclick = runDriverAudit;
-
-  // F12: Atualização de Drivers via Windows Update (busca real)
-  const btnWuaSearch = $("#btnDriverWuaSearch");
-  if (btnWuaSearch) btnWuaSearch.onclick = runDriverWuaSearch;
-  const btnWuaInstall = $("#btnDriverWuaInstall");
-  if (btnWuaInstall) btnWuaInstall.onclick = runDriverWuaInstall;
 
   // F1: Modo Game ao Vivo — toggle
   const lgbToggle = $("#lgbToggle");
@@ -3125,119 +3119,152 @@ document.addEventListener("click", async (e) => {
 });
 
 /* ---- F12: Auditoria de Drivers ------------------------------------------- */
+/* ---- F12: Atualização de Drivers (lista completa + checagem real por item) - */
+const DRV_ST = { ok: { col: "var(--green)", lbl: "OK" }, antigo: { col: "var(--amber)", lbl: "Antigo" }, muito_antigo: { col: "var(--red)", lbl: "Muito antigo" }, desconhecido: { col: "var(--ink-3)", lbl: "Desconhecido" } };
+
 async function runDriverAudit() {
   const btn = $("#btnDriverAudit"), box = $("#drvList"), sum = $("#drvSummary");
   if (!box) return;
   if (btn) btn.disabled = true;
-  box.innerHTML = `<div class="empty">${IC("ring")}<div>Verificando drivers…</div></div>`;
+  box.innerHTML = `<div class="empty">${IC("ring")}<div>Lendo drivers instalados…</div></div>`;
+  let drivers;
   try {
-    const drivers = await api("/api/drivers/verificar");
-    const antigos = drivers.filter((d) => d.status === "antigo" || d.status === "muito_antigo");
-    if (sum) sum.textContent = antigos.length ? `${antigos.length} driver(s) antigo(s)` : "Todos os drivers em dia";
-    if (!drivers.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum driver encontrado.</div></div>`; return; }
-    const ST = { ok: { col: "var(--green)", lbl: "OK" }, antigo: { col: "var(--amber)", lbl: "Antigo" }, muito_antigo: { col: "var(--red)", lbl: "Muito antigo" }, desconhecido: { col: "var(--ink-3)", lbl: "Desconhecido" } };
-    box.innerHTML = drivers.map((d) => {
-      const st = ST[d.status] || ST.desconhecido;
-      const age = d.idade_meses >= 0 ? `${d.idade_meses}m atrás` : "data desconhecida";
-      return `<div class="drv-row">
-        <div class="drv-meta">
-          <b>${escHtml(d.nome)}</b>
-          <span class="drv-cat">${escHtml(d.cat)}</span>
-          <span class="drv-ver">${escHtml(d.versao || "—")} · ${escHtml(d.data || "—")} (${age})</span>
-        </div>
-        <span class="drv-badge" style="color:${st.col}">${st.lbl}</span>
-      </div>`;
-    }).join("");
-    if (antigos.length) toast("warn", `${antigos.length} driver(s) antigo(s)`, "Use \"Buscar atualizações\" acima pra ver o que tem de verdade.");
-  } catch (e) { box.innerHTML = `<div class="empty">${IC("err")}<div>Falha: ${escHtml(e.message)}</div></div>`; }
-  finally { if (btn) btn.disabled = false; }
-}
+    drivers = await api("/api/drivers/verificar");
+  } catch (e) {
+    box.innerHTML = `<div class="empty">${IC("err")}<div>Falha: ${escHtml(e.message)}</div></div>`;
+    if (btn) btn.disabled = false;
+    return;
+  }
+  if (btn) btn.disabled = false;
+  if (!drivers.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum driver encontrado.</div></div>`; if (sum) sum.textContent = ""; return; }
 
-/* ---- Atualização real de drivers (Windows Update Agent) ------------------- */
-let _drvWuaPoll = null;
-let _drvWuaFound = [];
+  renderDriverAuditRows(drivers, null); // null = ainda não checou atualização real
+  if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · verificando atualizações reais…`;
 
-async function runDriverWuaSearch() {
-  const btn = $("#btnDriverWuaSearch"), box = $("#drvWuaBox"), sum = $("#drvWuaSummary"), actions = $("#drvWuaActions");
-  if (!box || _drvWuaPoll) return;
-  btn.disabled = true;
-  actions.style.display = "none";
-  sum.textContent = "";
-  box.innerHTML = `<div class="empty">${IC("ring")}<div>Buscando no Windows Update… pode levar até 1 min.</div></div>`;
+  // Dispara a checagem real (Windows Update) em paralelo, sem travar a lista que já apareceu.
   try {
     const r = await api("/api/drivers/wua/buscar", {});
-    if (!r.ok) { box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(r.erro || "Falha ao iniciar busca.")}</div></div>`; btn.disabled = false; return; }
+    if (!r.ok) throw new Error(r.erro || "falha ao iniciar checagem");
+    pollDriverAuditWua(drivers);
   } catch (e) {
-    box.innerHTML = `<div class="empty">${IC("err")}<div>Falha: ${escHtml(e.message)}</div></div>`; btn.disabled = false; return;
+    if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · não consegui checar atualizações agora (${e.message}).`;
   }
-  _drvWuaPoll = setInterval(async () => {
+}
+
+function pollDriverAuditWua(drivers) {
+  const poll = setInterval(async () => {
     try {
       const st = await api("/api/drivers/wua/status");
       if (st.estado === "pronto") {
-        clearInterval(_drvWuaPoll); _drvWuaPoll = null; btn.disabled = false;
-        _drvWuaFound = st.updates || [];
-        renderDriverWuaResults(_drvWuaFound);
+        clearInterval(poll);
+        renderDriverAuditRows(drivers, st.updates || []);
       } else if (st.estado === "erro") {
-        clearInterval(_drvWuaPoll); _drvWuaPoll = null; btn.disabled = false;
-        box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(st.erro || "Falha na busca.")}</div></div>`;
+        clearInterval(poll);
+        const sum = $("#drvSummary");
+        if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · falha ao checar atualizações (${st.erro || ""}).`;
       }
     } catch (e) { /* poll falhou momentaneamente — tenta de novo no próximo tick */ }
   }, 2000);
 }
 
-function renderDriverWuaResults(updates) {
-  const box = $("#drvWuaBox"), sum = $("#drvWuaSummary"), actions = $("#drvWuaActions");
-  if (!updates.length) {
-    box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhuma atualização de driver pendente — tudo em dia pelo Windows Update.</div></div>`;
-    sum.textContent = "Tudo em dia";
-    actions.style.display = "none";
-    return;
-  }
-  sum.textContent = `${updates.length} driver${updates.length === 1 ? "" : "es"} disponível${updates.length === 1 ? "" : "eis"}`;
-  box.innerHTML = updates.map((u, i) => `
-    <label class="sel-row">
-      <input type="checkbox" data-wua="${i}" data-mb="${u.tamanho_mb || 0}" checked>
-      <div class="sel-body"><div class="sel-top"><b>${escHtml(u.titulo)}</b>${u.tamanho_mb ? `<span class="sel-mb">${fmtCleanMB(u.tamanho_mb)}</span>` : ""}</div>
-        ${u.descricao ? `<span class="sel-desc">${escHtml(u.descricao)}</span>` : ""}</div>
-    </label>`).join("");
-  actions.style.display = "";
-  box.onchange = () => updateSelCount("#drvWuaBox", "#btnDriverWuaInstall", "Instalar");
-  updateSelCount("#drvWuaBox", "#btnDriverWuaInstall", "Instalar");
+// Casa um driver instalado (nome do registro) com um update real da WUA por
+// sobreposição de palavras — o título da WUA normalmente é "Fabricante -
+// Classe - Nome do dispositivo", e o "Nome do dispositivo" costuma ser quase
+// idêntico ao nome que lemos do registro (os dois vêm do mesmo .inf).
+function matchWuaUpdate(nome, wuaList) {
+  const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const words = norm(nome).split(" ").filter((w) => w.length > 2);
+  if (!words.length) return null;
+  let best = null, bestScore = 0;
+  wuaList.forEach((u) => {
+    const t = norm(u.titulo);
+    const score = words.reduce((s, w) => s + (t.includes(w) ? 1 : 0), 0);
+    if (score > bestScore && score >= Math.max(2, Math.ceil(words.length * 0.5))) { bestScore = score; best = u; }
+  });
+  return best;
 }
 
-function runDriverWuaInstall() {
-  const sel = $$("#drvWuaBox input:checked").map((c) => _drvWuaFound[+c.dataset.wua]).filter(Boolean);
-  if (!sel.length) return toast("warn", "Nada selecionado", "Marque ao menos um driver.");
+function renderDriverAuditRows(drivers, wuaUpdates) {
+  const box = $("#drvList"), sum = $("#drvSummary");
+  let comUpdate = 0;
+  box.innerHTML = drivers.map((d, i) => {
+    const st = DRV_ST[d.status] || DRV_ST.desconhecido;
+    const age = d.idade_meses >= 0 ? `${d.idade_meses}m atrás` : "data desconhecida";
+    const match = wuaUpdates ? matchWuaUpdate(d.nome, wuaUpdates) : undefined;
+    let action;
+    if (wuaUpdates === null) {
+      action = `<span class="drv-checking">${IC("ring")} checando…</span>`;
+    } else if (match) {
+      comUpdate++;
+      action = `<button class="drv-update-btn" data-wuaid="${escHtml(match.id)}">${IC("update")} Atualizar${match.tamanho_mb ? " (" + fmtCleanMB(match.tamanho_mb) + ")" : ""}</button>`;
+    } else if (d.cat === "GPU" && /nvidia/i.test(d.nome)) {
+      action = `<button class="drv-nvlink-sm" data-nvlink2="${escHtml(d.nome)}">Ver na NVIDIA →</button>`;
+    } else {
+      action = `<span class="drv-noupdate">Sem atualização encontrada</span>`;
+    }
+    return `<div class="drv-row">
+      <div class="drv-meta">
+        <b>${escHtml(d.nome)}</b>
+        <span class="drv-cat">${escHtml(d.cat)}</span>
+        <span class="drv-ver">${escHtml(d.versao || "—")} · ${escHtml(d.data || "—")} (${age})</span>
+      </div>
+      <span class="drv-badge" style="color:${st.col}">${st.lbl}</span>
+      ${action}
+    </div>`;
+  }).join("");
+
+  if (sum) {
+    if (wuaUpdates === null) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · verificando atualizações reais…`;
+    else sum.textContent = comUpdate
+      ? `${comUpdate} atualização${comUpdate === 1 ? "" : "ões"} real${comUpdate === 1 ? "" : "is"} encontrada${comUpdate === 1 ? "" : "s"}`
+      : "Nenhuma atualização real encontrada agora pelo Windows Update";
+  }
+
+  $$("#drvList [data-wuaid]").forEach((btn) => { btn.onclick = () => installSingleDriverUpdate(btn); });
+  $$("#drvList [data-nvlink2]").forEach((btn) => {
+    btn.onclick = async () => {
+      const nome = btn.dataset.nvlink2;
+      btn.disabled = true; const orig = btn.textContent; btn.textContent = "Procurando…";
+      try {
+        const r = await api("/api/drivers/nvidia-link?nome=" + encodeURIComponent(nome));
+        if (r.ok) window.open(r.url, "_blank");
+        else toast("warn", "Não achei essa placa no catálogo da NVIDIA", r.erro || "");
+      } catch (e) { toast("err", "Falha", e.message); }
+      finally { btn.disabled = false; btn.textContent = orig; }
+    };
+  });
+}
+
+function installSingleDriverUpdate(btn) {
+  const id = btn.dataset.wuaid;
+  const nome = btn.closest(".drv-row")?.querySelector(".drv-meta b")?.textContent || "este driver";
   confirmModal({
-    title: `Instalar ${sel.length} driver${sel.length === 1 ? "" : "es"}?`,
+    title: `Instalar atualização de ${nome}?`,
     body: `<p>Baixa e instala pelo Windows Update — o mecanismo oficial. <b>A tela pode piscar por alguns segundos</b> durante a troca (normal em driver de GPU/rede). Evite fazer isso no meio de uma sessão remota crítica.</p>`,
     okLabel: "Instalar",
     onOk: async () => {
-      const box = $("#drvWuaBox");
-      box.innerHTML = `<div class="empty">${IC("ring")}<div>Baixando e instalando…</div></div>`;
-      $("#drvWuaActions").style.display = "none";
+      btn.disabled = true; btn.textContent = "Instalando…";
       try {
-        const r = await api("/api/drivers/wua/instalar", { ids: sel.map((u) => u.id) });
-        if (!r.ok) { box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(r.erro || "Falha ao iniciar instalação.")}</div></div>`; return; }
-      } catch (e) { box.innerHTML = `<div class="empty">${IC("err")}<div>Falha: ${escHtml(e.message)}</div></div>`; return; }
-      pollDriverWuaInstall();
+        const r = await api("/api/drivers/wua/instalar", { ids: [id] });
+        if (!r.ok) { toast("err", "Falha ao iniciar", r.erro || ""); btn.disabled = false; btn.textContent = "Tentar de novo"; return; }
+      } catch (e) { toast("err", "Falha", e.message); btn.disabled = false; btn.textContent = "Tentar de novo"; return; }
+      pollSingleDriverInstall(btn, nome);
     }
   });
 }
 
-function pollDriverWuaInstall() {
-  const box = $("#drvWuaBox");
+function pollSingleDriverInstall(btn, nome) {
   const poll = setInterval(async () => {
     try {
       const st = await api("/api/drivers/wua/status");
       if (st.estado === "concluido") {
         clearInterval(poll);
-        box.innerHTML = `<div class="empty">${IC("ok")}<div>Driver(s) instalado(s)!${st.reboot_necessario ? " Reinicie o PC pra concluir." : ""}</div></div>`;
-        toast("ok", "Driver instalado", st.reboot_necessario ? "Reinicie para concluir." : "");
-        renderDriver();
+        btn.outerHTML = `<span class="drv-badge" style="color:var(--green)">Instalado${st.reboot_necessario ? " · reinicie" : ""}</span>`;
+        toast("ok", "Driver instalado", nome + (st.reboot_necessario ? " — reinicie pra concluir." : ""));
       } else if (st.estado === "erro") {
         clearInterval(poll);
-        box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(st.erro || "Falha na instalação.")}</div></div>`;
+        btn.disabled = false; btn.textContent = "Tentar de novo";
+        toast("err", "Falha na instalação", st.erro || "");
       }
     } catch (e) {}
   }, 2000);

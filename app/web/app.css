@@ -741,6 +741,16 @@ body.perf .pt{display:none}body.perf .bolt{opacity:0}body.perf .energy-pulse.on{
 .svc-badge.on{color:var(--green);background:#08201a;border:1px solid #154a35}
 .svc-badge.off{color:var(--ink-3);background:var(--panel-3);border:1px solid var(--line)}
 .drv-badge{font-size:12px;font-weight:700;flex:none}
+.drv-checking{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-3);flex:none;white-space:nowrap}
+.drv-checking svg{width:13px;height:13px}
+.drv-noupdate{font-size:11px;color:var(--ink-4);flex:none;white-space:nowrap}
+.drv-update-btn{display:flex;align-items:center;gap:5px;background:linear-gradient(180deg,var(--cyan-br),var(--cyan));color:#021019;border:0;font-family:var(--font-mono);font-size:11px;font-weight:700;padding:6px 10px;cursor:pointer;clip-path:var(--cut-btn);flex:none;white-space:nowrap}
+.drv-update-btn:hover{opacity:.9}
+.drv-update-btn:disabled{opacity:.6;cursor:default}
+.drv-update-btn svg{width:13px;height:13px}
+.drv-nvlink-sm{background:none;border:1px solid var(--line);color:var(--cyan-br);font-family:var(--font-mono);font-size:11px;cursor:pointer;padding:6px 10px;clip-path:var(--cut-btn);flex:none;white-space:nowrap}
+.drv-nvlink-sm:hover{border-color:var(--cyan);color:var(--cyan)}
+.drv-nvlink-sm:disabled{opacity:.5;cursor:default}
 @media (max-width:980px){.tools-grid{grid-template-columns:1fr}}
 
 /* ===== Limpeza profunda ===== */
