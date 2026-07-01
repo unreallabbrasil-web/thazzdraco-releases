@@ -3,6 +3,7 @@
 package winutil
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,8 +45,9 @@ func GetUpdate() *UpdateInfo {
 
 // ForceCheck força uma checagem imediata. Em caso de erro de rede, preserva o
 // cache existente e o retorna — assim o badge não desaparece por falha temporária.
-func ForceCheck(currentVersion string) *UpdateInfo {
-	info, ok := fetchUpdate(currentVersion)
+// ctx cancela a requisição HTTP se o cliente (a janela do app) desistir antes.
+func ForceCheck(ctx context.Context, currentVersion string) *UpdateInfo {
+	info, ok := fetchUpdate(ctx, currentVersion)
 	if ok {
 		updateMu.Lock()
 		updateInfo = info
@@ -63,14 +65,14 @@ func ForceCheck(currentVersion string) *UpdateInfo {
 func StartUpdateChecker(currentVersion string) {
 	go func() {
 		time.Sleep(5 * time.Second)
-		if info, ok := fetchUpdate(currentVersion); ok {
+		if info, ok := fetchUpdate(context.Background(), currentVersion); ok {
 			updateMu.Lock()
 			updateInfo = info
 			updateMu.Unlock()
 		}
 		ticker := time.NewTicker(4 * time.Hour)
 		for range ticker.C {
-			if info, ok := fetchUpdate(currentVersion); ok {
+			if info, ok := fetchUpdate(context.Background(), currentVersion); ok {
 				updateMu.Lock()
 				updateInfo = info
 				updateMu.Unlock()
@@ -83,13 +85,13 @@ func StartUpdateChecker(currentVersion string) {
 // Retorna (nil, false) em caso de erro de rede/parse — o segundo valor indica sucesso.
 // Retorna (&UpdateInfo{Available:false}, true) quando não há versão mais nova.
 // Retorna (&UpdateInfo{Available:true,...}, true) quando há update disponível.
-func fetchUpdate(current string) (*UpdateInfo, bool) {
+func fetchUpdate(ctx context.Context, current string) (*UpdateInfo, bool) {
 	if UpdateOwner == "SEU_USUARIO_GITHUB" {
 		return &UpdateInfo{Available: false}, true
 	}
 	url := "https://api.github.com/repos/" + UpdateOwner + "/" + UpdateRepo + "/releases/latest"
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, false
 	}
@@ -239,11 +241,19 @@ for ($i = 0; $i -lt 20; $i++) {
 if ($ok) {
   Copy-Item -Path $new -Destination $self -Force
   if (-not (Test-Path $self)) { Move-Item -Path $bak -Destination $self -Force }  # rollback
+  Start-Process -FilePath $self
+  Start-Sleep -Milliseconds 600
+  Remove-Item $bak -Force -ErrorAction SilentlyContinue
+  Remove-Item $new -Force -ErrorAction SilentlyContinue
+} else {
+  # Nao conseguiu trocar o exe (arquivo preso por 6s, ex.: antivirus) — reabre o
+  # app antigo sem perder o update baixado silenciosamente, e loga pra diagnostico.
+  $logDir = "$env:ProgramData\ThazzDraco"
+  New-Item -ItemType Directory -Force -Path $logDir -ErrorAction SilentlyContinue | Out-Null
+  "$(Get-Date -Format o) - falha ao trocar o exe apos 20 tentativas (6s). Update preservado em: $new" |
+    Out-File -FilePath "$logDir\update-fail.log" -Append -Encoding utf8 -ErrorAction SilentlyContinue
+  Start-Process -FilePath $self
 }
-Start-Process -FilePath $self
-Start-Sleep -Milliseconds 600
-Remove-Item $bak -Force -ErrorAction SilentlyContinue
-Remove-Item $new -Force -ErrorAction SilentlyContinue
 `, esc(selfExe), esc(newExe), esc(bak))
 
 	cmd := exec.Command("powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps)

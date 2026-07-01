@@ -13,7 +13,7 @@ import (
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	var info *winutil.UpdateInfo
 	if r.URL.Query().Get("force") == "1" {
-		info = winutil.ForceCheck(s.version)
+		info = winutil.ForceCheck(r.Context(), s.version)
 	} else {
 		info = winutil.GetUpdate()
 	}

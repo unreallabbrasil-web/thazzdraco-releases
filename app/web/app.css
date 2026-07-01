@@ -944,9 +944,12 @@ body.perf .pt{display:none}body.perf .bolt{opacity:0}body.perf .energy-pulse.on{
 .gcard-body{padding:10px 12px 12px}
 .gcard-name{font-size:13.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px}
 .gcard-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:8px}
-.gcard-dots{display:flex;gap:5px}
-.gdot{width:7px;height:7px;border-radius:50%;background:var(--line-2);border:1px solid var(--line)}
+.gcard-dots{display:flex;gap:8px}
+.gdot-item{display:flex;align-items:center;gap:3px}
+.gdot-item b{font-size:8px;font-weight:700;color:var(--ink-4);font-family:var(--font-mono);letter-spacing:.02em}
+.gdot{width:7px;height:7px;border-radius:50%;background:var(--line-2);border:1px solid var(--line);flex:none}
 .gdot.on{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 5px #2ea8e655}
+.gdot.on ~ b{color:var(--cyan-br)}
 
 /* ===== Jogos — painel lateral deslizante ==================================== */
 .game-panel-bg{position:fixed;inset:0;z-index:59;background:#00000066;opacity:0;pointer-events:none;transition:opacity .22s;backdrop-filter:blur(2px)}
@@ -1026,8 +1029,9 @@ body.perf .pt{display:none}body.perf .bolt{opacity:0}body.perf .energy-pulse.on{
 
 
 /* ===== Painel de Atualização (NVIDIA-style) ================================== */
-.upd-btn-wrap{position:relative;display:inline-flex;align-items:center;gap:5px;padding-left:10px;margin-left:4px;border-left:1px solid rgba(255,255,255,.1)}
-.upd-dot{position:absolute;top:5px;left:22px;width:7px;height:7px;background:var(--green);border-radius:50%;border:2px solid var(--bg);animation:updPulse 2s ease-in-out infinite;pointer-events:none}
+.upd-btn-wrap{display:inline-flex;align-items:center;gap:5px;padding-left:10px;margin-left:4px;border-left:1px solid rgba(255,255,255,.1)}
+.upd-icon-wrap{position:relative;display:inline-flex}
+.upd-dot{position:absolute;top:-2px;right:-2px;width:7px;height:7px;background:var(--green);border-radius:50%;border:2px solid var(--bg);animation:updPulse 2s ease-in-out infinite;pointer-events:none}
 .upd-dot.hidden{display:none}
 @keyframes updPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.6}}
 .iconbtn.upd-avail{color:var(--green)}

@@ -3,6 +3,7 @@
 package winutil
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -58,10 +59,14 @@ func flushCoverCache() {
 }
 
 // steamSearch retorna o app_id Steam do primeiro resultado que case com o nome.
-func steamSearch(name string) int {
+func steamSearch(ctx context.Context, name string) int {
 	u := "https://store.steampowered.com/api/storesearch/?term=" + url.QueryEscape(name) + "&l=english&cc=US"
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(u)
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return 0
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0
 	}
@@ -88,8 +93,9 @@ func steamSearch(name string) int {
 }
 
 // ResolveCoverURL devolve a URL da capa portrait de um jogo, buscando na Steam
-// pelo nome. Usa cache em disco; retorna "" se nao encontrado.
-func ResolveCoverURL(name string) string {
+// pelo nome. Usa cache em disco; retorna "" se nao encontrado. ctx cancela a
+// busca se o cliente desistir antes (ex.: handler HTTP cancelado).
+func ResolveCoverURL(ctx context.Context, name string) string {
 	loadCoverCache()
 
 	key := strings.ToLower(strings.TrimSpace(name))
@@ -101,7 +107,7 @@ func ResolveCoverURL(name string) string {
 	}
 	coverMu.Unlock()
 
-	appID := steamSearch(name)
+	appID := steamSearch(ctx, name)
 	var coverURL string
 	if appID > 0 {
 		coverURL = fmt.Sprintf("https://cdn.steamstatic.com/steam/apps/%d/library_600x900.jpg", appID)
@@ -149,7 +155,7 @@ func ResolveCoverURLs(games []Game) {
 		go func(idx int, name string) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results <- result{idx, ResolveCoverURL(name)}
+			results <- result{idx, ResolveCoverURL(context.Background(), name)}
 		}(j.i, j.name)
 	}
 

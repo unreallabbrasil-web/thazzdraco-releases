@@ -27,7 +27,9 @@ function sectionOf(cat) {
 }
 
 const state = { scan: null, rules: [], byId: {}, page: "inicio", cat: "todas", query: "", scoreInicial: null, startup: [], bench: null, benchBase: null, fps: null, fpsBase: null, fpsDur: 30, fpsPoll: null, fpsRefreshing: false, diag: null, driver: null, repairPoll: null, bloat: null, deep: null, thermal: null, clientLogo: null, admin: true, gpuPanel: null, customJogos: [], updatePoll: null, sub: { manutencao: "limpeza", medicao: "desempenho" } };
-function escHtml(s) { return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function escHtml(s) { return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+// "1 otimização aplicada" / "3 otimizações aplicadas" — evita repetir a formula ternária em cada toast.
+function pluralWord(n, singular, plural) { return n === 1 ? singular : (plural || singular + "s"); }
 
 /* ---- API ----------------------------------------------------------------- */
 async function api(path, body) {
@@ -238,7 +240,7 @@ function renderReco() {
     .forEach((r) => recs.push({ r, kind: "apply" }));
 
   const list = recs.slice(0, 6);
-  if (!list.length) { $("#reco").innerHTML = `<div class="reco-empty">Tudo certo por aqui — nenhuma recomendação pendente. 🐉</div>`; return; }
+  if (!list.length) { $("#reco").innerHTML = `<div class="reco-empty">Tudo certo por aqui — nenhuma recomendação pendente.</div>`; return; }
   $("#reco").innerHTML = list.map(({ r, kind, mb }) => {
     const sf = tierSafe(r.tier);
     let btn;
@@ -634,8 +636,8 @@ async function renderHealth() {
     }
   }
   box.innerHTML = cards.join("");
-  const note = $("#healthNote"); if (!note) box.insertAdjacentHTML("afterend", `<div class="health-note" id="healthNote">🌡️ ${escHtml(h.temp_nota || "")}</div>`);
-  else note.textContent = "🌡️ " + (h.temp_nota || "");
+  const note = $("#healthNote"); if (!note) box.insertAdjacentHTML("afterend", `<div class="health-note" id="healthNote">${escHtml(h.temp_nota || "")}</div>`);
+  else note.textContent = h.temp_nota || "";
 }
 
 /* ---- Relatório do cliente ------------------------------------------------ */
@@ -677,10 +679,10 @@ function gameCard(g, i) {
         ${g.perfil ? `<span class="prof-pill" style="font-size:10px">🎯 ${escHtml(g.perfil.tipo)}</span>` : ""}
       </div>
       <div class="gcard-dots">
-        <span class="gdot${g.fso ? " on" : ""}" title="FSO off"></span>
-        <span class="gdot${g.gpu ? " on" : ""}" title="GPU máx"></span>
-        <span class="gdot${g.prio ? " on" : ""}" title="CPU alta"></span>
-        <span class="gdot${g.av ? " on" : ""}" title="Anti-vírus"></span>
+        <span class="gdot-item" title="FSO off"><i class="gdot${g.fso ? " on" : ""}"></i><b>F</b></span>
+        <span class="gdot-item" title="GPU máx"><i class="gdot${g.gpu ? " on" : ""}"></i><b>G</b></span>
+        <span class="gdot-item" title="CPU alta"><i class="gdot${g.prio ? " on" : ""}"></i><b>P</b></span>
+        <span class="gdot-item" title="Anti-vírus"><i class="gdot${g.av ? " on" : ""}"></i><b>A</b></span>
       </div>
     </div>
   </div>`;
@@ -818,7 +820,7 @@ function renderPanelNvidia(isNvidia, gpus, g) {
       <div class="gnv-row"><div class="gnv-info"><b>Shader Cache</b><span>Ilimitado — evita gagueiros ao compilar shaders</span></div><span class="gnv-tag rec">Recomendado</span></div>
       <div class="gnv-row"><div class="gnv-info"><b>VSync</b><span>Desativado por aplicativo — controle pelo jogo</span></div><span class="gnv-tag info">Por aplicativo</span></div>
     </div>
-    <button class="btn-hero gnv-open-btn" onclick="openNvidiaPanel()">Abrir NVIDIA Painel de Controle</button>
+    <button class="btn-hero gnv-open-btn" onclick="showNvidiaPanelGuide()">Como configurar no Painel NVIDIA</button>
     <div class="gnv-note">Configure em "Gerenciar configurações 3D → Configurações do programa" e selecione o executável ${g.exe ? `(${escHtml(g.exe.split(/[/\\]/).pop())})` : "do jogo"}.</div>`;
 }
 
@@ -945,10 +947,8 @@ function refreshGameCard(i) {
   card.outerHTML = gameCard(g, i);
 }
 
-function openNvidiaPanel() {
-  try { api("/api/jogos/tweak", { exe: "", pasta: "", fso: false, gpu: false, prio: false, av: false }).catch(() => {}); } catch {}
-  // Abre o painel de controle NVIDIA via shell (best effort)
-  fetch("/api/ferramentas/dns").catch(() => {}); // keep-alive no-op
+// Não existe API pra abrir o Painel NVIDIA automaticamente — mostra o passo a passo manual.
+function showNvidiaPanelGuide() {
   const msg = "Abra o Painel de Controle NVIDIA → Configurações 3D → Gerenciar configurações 3D → aba 'Configurações do programa'.";
   infoModal("NVIDIA Painel de Controle", `<p>${msg}</p>`);
 }
@@ -1239,7 +1239,7 @@ function showScoreResult(antes, depois, n) {
         <b class="scr-num" style="color:${colDepois}">${depois}</b>
       </div>
     </div>
-    <div class="scr-sub">${n} otimização${n > 1 ? "ões" : ""} aplicada${n > 1 ? "s" : ""} · score subiu ${diff} ${diff === 1 ? "ponto" : "pontos"}</div>
+    <div class="scr-sub">${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")} · score subiu ${diff} ${pluralWord(diff, "ponto", "pontos")}</div>
   `);
 }
 let _adminWarned = false;
@@ -1284,7 +1284,7 @@ async function applyIds(ids, origem, msg) {
       const erros = Object.values(rep.erros || {});
       const negado = erros.some((m) => /denied|negad|acesso/i.test(m || ""));
       if (rep.limpeza_mb) toast("ok", `Limpeza concluída`, `${fmtMB(rep.limpeza_mb)} liberados.`);
-      else if (n) toast("ok", `${n} otimização${n > 1 ? "ões" : ""} aplicada${n > 1 ? "s" : ""}`, rep.restore_point ? "Ponto de restauração criado." : "");
+      else if (n) toast("ok", `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}`, rep.restore_point ? "Ponto de restauração criado." : "");
       else if (!erros.length) toast("info", "Nada a aplicar", nadaAplicarMotivo(rep.puladas));
       if (negado) { adminWarn(); }   // a maioria das otimizações precisa de administrador
       else if (erros.length) toast("err", "Alguns itens falharam", erros[0]);
@@ -1318,7 +1318,7 @@ async function applyGreens() {
   try { const d = await api("/api/aplicar-verdes", { confirmar: false }); afterMutation(d);
     const rep = d.relatorio || {}, n = (rep.aplicadas || []).length;
     const negado = Object.values(rep.erros || {}).some((m) => /denied|negad|acesso/i.test(m || ""));
-    toast(n ? "ok" : "info", n ? `${n} otimização${n > 1 ? "ões" : ""} aplicada${n > 1 ? "s" : ""}` : "Nada novo aplicado", n ? "Ganhos seguros ativados." : "");
+    toast(n ? "ok" : "info", n ? `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}` : "Nada novo aplicado", n ? "Ganhos seguros ativados." : "");
     if (negado) adminWarn();
   } catch (e) { toast("err", "Falha", e.message); } finally { busy(false); }
 }
@@ -1472,7 +1472,16 @@ function wire() {
   });
 
   $("#modal").onclick = (e) => { if (e.target.id === "modal" || e.target.hasAttribute("data-close")) closeModal(); };
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+  // Escape fecha qualquer overlay aberto — não só o modal genérico, senão os
+  // painéis customizados (update/jogo/relatório) ficam presos pra quem navega
+  // por teclado.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if ($("#updPanel")?.classList.contains("open")) { closeUpdatePanel(); return; }
+    if ($("#gamePanel")?.classList.contains("open")) { closeGamePanel(); return; }
+    if ($("#reportOverlay")?.classList.contains("show")) { $("#reportOverlay").classList.remove("show"); return; }
+    closeModal();
+  });
 
   // B2: tooltip customizado — substitui title="" nativo (não funciona em touch/tablet)
   const _tip = document.createElement("div");
@@ -2187,7 +2196,7 @@ async function renderDeepClean() {
   box.innerHTML = `<div class="empty" style="padding:24px">${IC("ring")}<div>Calculando o que dá para limpar…</div></div>`;
   let d; try { d = await api("/api/limpeza-profunda/scan"); } catch (e) { box.innerHTML = `<div class="empty">${IC("err")}<div>Falha ao escanear.</div></div>`; return; }
   state.deep = d.categorias || [];
-  if (!state.deep.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nada relevante para limpeza profunda. 👍</div></div>`; $("#deepActions").style.display = "none"; return; }
+  if (!state.deep.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nada relevante para limpeza profunda — já está enxuto.</div></div>`; $("#deepActions").style.display = "none"; return; }
   box.innerHTML = state.deep.map((c, i) => `
     <label class="deep-row${c.aviso ? " warn" : ""}">
       <input type="checkbox" data-deep="${i}" ${c.recomendado ? "checked" : ""}>
@@ -2229,7 +2238,7 @@ async function renderBloat() {
   box.innerHTML = `<div class="empty" style="padding:24px">${IC("ring")}<div>Lendo apps instalados…</div></div>`;
   let d; try { d = await api("/api/debloat/lista"); } catch (e) { box.innerHTML = `<div class="empty">${IC("err")}<div>Falha ao ler apps.</div></div>`; return; }
   state.bloat = d.apps || [];
-  if (!state.bloat.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum bloatware conhecido instalado. 👍</div></div>`; $("#bloatActions").style.display = "none"; return; }
+  if (!state.bloat.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum bloatware conhecido instalado — já está limpo.</div></div>`; $("#bloatActions").style.display = "none"; return; }
   const byCat = {};
   state.bloat.forEach((a, i) => { (byCat[a.categoria] = byCat[a.categoria] || []).push({ a, i }); });
   box.innerHTML = Object.entries(byCat).map(([cat, items]) => `
@@ -2346,9 +2355,14 @@ async function runTool(id, el) {
     confirmModal({ title: "Faxina de rede?", body: "<p>Limpa o DNS e reseta TCP/IP + Winsock. <b>Não derruba a conexão agora</b> (sem release/renew), mas o reset só vale após <b>reiniciar</b>. Pode resetar configs de VPN/proxy.</p>", okLabel: "Limpar rede",
       onOk: async () => { const r = await fire("/api/ferramentas/rede", {}, "Limpando rede…"); if (r) toast("ok", "Rede limpa", "Reinicie para concluir o reset."); } });
   } else if (id === "trim") {
+    // Manutenção padrão de SSD, sem efeito colateral — mesma categoria de "sem
+    // confirmação" que Defender/Pinger/DPC (diagnóstico/manutenção, não muda config).
     const r = await fire("/api/ferramentas/trim", {}, "Rodando TRIM…"); if (r) toast(r.ok ? "ok" : "warn", "TRIM", r.mensagem || "");
   } else if (id === "energia") {
-    const r = await fire("/api/ferramentas/energia-max", {}, "Ativando plano…"); if (r) toast("ok", "Plano de energia", r.mensagem || "");
+    // Troca o plano de energia ativo (config persistente) — mesma régua de
+    // confirmação que "Faxina de rede" e "Hibernação", que também mudam config.
+    confirmModal({ title: "Ativar Energia Máxima?", body: "<p>Troca o plano de energia ativo para <b>Ultimate Performance</b>. Fica valendo até você trocar de novo — reversível pelo Painel de Controle → Opções de Energia.</p>", okLabel: "Ativar",
+      onOk: async () => { const r = await fire("/api/ferramentas/energia-max", {}, "Ativando plano…"); if (r) toast("ok", "Plano de energia", r.mensagem || ""); } });
   } else if (id === "defender") {
     const r = await fire("/api/ferramentas/defender", {}, "Iniciando varredura…"); if (r) toast(r.ok ? "ok" : "err", r.ok ? "Varredura iniciada" : "Falha", r.ok ? "Roda em segundo plano; veja o Defender." : (r.erro || ""));
   } else if (id === "hibernacao") {
@@ -2832,7 +2846,7 @@ async function renderCustomPresets() {
               const r = await api("/api/presets/custom/aplicar", { id: btn.dataset.cpApply });
               if (r.relatorio) {
                 const n = r.relatorio.aplicados || 0;
-                toast("ok", "Preset aplicado", `${n} regra${n!==1?"s":""} ativada${n!==1?"s":""}.`);
+                toast("ok", "Preset aplicado", `${n} ${pluralWord(n, "regra ativada", "regras ativadas")}.`);
                 if (r.scan) { ingest(r.scan); }
               } else toast("err", "Falha", r.erro || "");
             } catch (e) { toast("err", "Falha", e.message); }
@@ -3230,10 +3244,18 @@ function applyPreset(id) {
   });
 }
 
-/* ---- Boot ---------------------------------------------------------------- */
 /* ---- Atualização (painel NVIDIA-style) ------------------------------------ */
 let _appVersion = "";
 let _updateInfo = null;
+
+// Bloco "Instalada vX -> Disponível vY" reusado no painel (parado) e durante o download.
+function updVersionsHtml(curV, newV) {
+  return `<div class="upd-versions">
+      <div class="upd-ver cur"><span class="uv-lbl">Instalada</span><b class="uv-num">${escHtml(curV)}</b></div>
+      <div class="upd-arrow">${IC("update")}</div>
+      <div class="upd-ver new"><span class="uv-lbl">Disponível</span><b class="uv-num">${escHtml(newV)}</b></div>
+    </div>`;
+}
 
 function applyUpdateBadge(r) {
   const dot = $("#updDot"), btn = $("#btnUpdatePanel"), chip = $("#updChip"); if (!dot) return;
@@ -3277,11 +3299,7 @@ function renderUpdatePanel() {
   const newV = "v" + (r.version || "");
   const notes = (r.notes || "").split("\n").filter(l => l.trim()).slice(0, 10).join("\n");
   body.innerHTML = `
-    <div class="upd-versions">
-      <div class="upd-ver cur"><span class="uv-lbl">Instalada</span><b class="uv-num">${escHtml(curV)}</b></div>
-      <div class="upd-arrow">${IC("update")}</div>
-      <div class="upd-ver new"><span class="uv-lbl">Disponível</span><b class="uv-num">${escHtml(newV)}</b></div>
-    </div>
+    ${updVersionsHtml(curV, newV)}
     ${notes ? `<div class="upd-notes"><div class="upd-notes-ttl">Novidades</div><pre class="upd-notes-body">${escHtml(notes)}</pre></div>` : ""}
     <button class="btn-hero upd-dl-btn" id="updDlBtn">${IC("update")} Instalar ${escHtml(newV)}</button>
     <button class="upd-check-btn" onclick="forceCheckUpdate()">Verificar agora</button>`;
@@ -3296,11 +3314,7 @@ async function startInstall(updateInfo) {
   const curV = _appVersion ? "v" + _appVersion : "—";
 
   body.innerHTML = `
-    <div class="upd-versions">
-      <div class="upd-ver cur"><span class="uv-lbl">Instalada</span><b class="uv-num">${escHtml(curV)}</b></div>
-      <div class="upd-arrow">${IC("update")}</div>
-      <div class="upd-ver new"><span class="uv-lbl">Disponível</span><b class="uv-num">${escHtml(newV)}</b></div>
-    </div>
+    ${updVersionsHtml(curV, newV)}
     <div class="upd-dl-progress">
       <div class="upd-dl-bar-wrap"><div class="upd-dl-bar" id="updDlBar" style="width:0%"></div></div>
       <div class="upd-dl-txt" id="updDlTxt">Iniciando download…</div>
@@ -3347,12 +3361,15 @@ async function forceCheckUpdate() {
     const r = await api("/api/update/check?force=1");
     if (r && !r.pending) { _updateInfo = r; applyUpdateBadge(r); renderUpdatePanel(); }
     else {
-      // GitHub inacessível no momento — mostra retry em vez de spinner infinito
-      if (body) body.innerHTML = `<div class="upd-status">${IC("warn")}<div><b>Sem resposta</b><span>GitHub indisponível agora.</span></div></div>
+      // O backend local respondeu, mas ele NÃO conseguiu falar com o GitHub —
+      // mostra retry em vez de spinner infinito.
+      if (body) body.innerHTML = `<div class="upd-status">${IC("warn")}<div><b>GitHub indisponível</b><span>O serviço de atualização não respondeu agora.</span></div></div>
         <button class="upd-check-btn" onclick="forceCheckUpdate()">Tentar novamente</button>`;
     }
   } catch {
-    if (body) body.innerHTML = `<div class="upd-status">${IC("warn")}<div><b>Erro de conexão</b><span>Verifique sua internet.</span></div></div>
+    // Aqui quem falhou foi o fetch pro PRÓPRIO backend local (127.0.0.1) — não é
+    // a internet do cliente, é o núcleo do app que não respondeu a tempo.
+    if (body) body.innerHTML = `<div class="upd-status">${IC("warn")}<div><b>Núcleo não respondeu</b><span>Tente de novo em alguns segundos.</span></div></div>
       <button class="upd-check-btn" onclick="forceCheckUpdate()">Tentar novamente</button>`;
   }
 }
@@ -3405,8 +3422,15 @@ async function boot() {
     if (bv) {
       bv.textContent = "v" + (info.versao || "—");
       bv.title = `ThazzDraco v${info.versao} — Clique para reconstruir (CONSTRUIR.ps1)`;
-      bv.onclick = async () => {
+      bv.onclick = () => {
         if (bv.classList.contains("building")) return;
+        confirmModal({
+          title: "Reconstruir o app?",
+          body: "<p>Isso dispara um <b>rebuild completo</b> do ThazzDraco (roda CONSTRUIR.ps1) — é uma ferramenta de desenvolvimento, não uma otimização do PC do cliente.</p>",
+          okLabel: "Reconstruir", onOk: () => runRebuild(bv, info),
+        });
+      };
+      async function runRebuild(bv, info) {
         bv.classList.add("building"); bv.textContent = "BUILDING…";
         try {
           const r = await api("/api/rebuild");

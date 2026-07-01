@@ -186,6 +186,19 @@ func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem stri
 		byID[rules[i].ID] = &rules[i]
 	}
 
+	// Dedupe preservando ordem: evita rodar a mesma regra 2x no mesmo lote (ex.:
+	// cleanup, que sempre reexecuta por nao ter deteccao de "ja aplicado" — se o
+	// id aparecer repetido na lista, limpava/aplicava em dobro sem necessidade).
+	seen := map[string]bool{}
+	dedup := ids[:0:0]
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			dedup = append(dedup, id)
+		}
+	}
+	ids = dedup
+
 	// Ponto de restauracao (rede de seguranca secundaria; best-effort).
 	if err := winutil.CreateRestorePoint("ThazzDraco Optimizer - antes de aplicar"); err == nil {
 		rep.RestorePoint = true

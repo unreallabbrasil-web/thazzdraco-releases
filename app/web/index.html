@@ -37,7 +37,7 @@
       <div class="telem">
         <div class="tcell ok"><b id="cAplicados">—</b><span>Aplicados</span></div>
         <div class="tcell pn"><b id="cPendentes">—</b><span>Pendentes</span></div>
-        <div class="tcell op"><b id="cOportunidades">—</b><span>Extras</span></div>
+        <div class="tcell op" title="Ajustes opcionais além do essencial — não obrigatórios, mas somam ganho"><b id="cOportunidades">—</b><span>Extras</span></div>
       </div>
       <button class="iconbtn" id="btnHist" title="Histórico de otimizações"><span data-icon="history"></span></button>
       <button class="iconbtn" id="btnBackup" title="Backup &amp; restauração"><span data-icon="backup"></span></button>
@@ -46,8 +46,10 @@
       <button class="iconbtn" id="btnPerf" title="Modo performance (reduz efeitos)"><span data-icon="perf"></span></button>
       <button class="iconbtn" id="btnRescan" title="Reescanear"><span data-icon="scan"></span></button>
       <div class="upd-btn-wrap">
-        <button class="iconbtn" id="btnUpdatePanel" title="Atualizações"><span data-icon="update"></span></button>
-        <span class="upd-dot hidden" id="updDot"></span>
+        <span class="upd-icon-wrap">
+          <button class="iconbtn" id="btnUpdatePanel" title="Atualizações"><span data-icon="update"></span></button>
+          <span class="upd-dot hidden" id="updDot"></span>
+        </span>
         <button class="upd-chip" id="updChip" onclick="openUpdatePanel()">
           <span class="upd-chip-new">NOVA</span>
           <span id="updChipTxt">v—</span>

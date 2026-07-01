@@ -14,7 +14,7 @@ func (s *Server) handleGameCover(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"ok": false, "erro": "name obrigatório"})
 		return
 	}
-	u := winutil.ResolveCoverURL(name)
+	u := winutil.ResolveCoverURL(r.Context(), name)
 	writeJSON(w, 200, map[string]any{"ok": true, "url": u})
 }
 
