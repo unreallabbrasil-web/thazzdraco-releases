@@ -1031,6 +1031,58 @@ body.perf .pt{display:none}body.perf .bolt{opacity:0}body.perf .energy-pulse.on{
 .btn-dismiss-update{background:none;border:none;color:#6aaf7a;font-size:16px;cursor:pointer;padding:2px 6px;flex-shrink:0;opacity:.7}
 .btn-dismiss-update:hover{opacity:1}
 
+/* ===== Painel de Atualização (NVIDIA-style) ================================== */
+.upd-btn-wrap{position:relative;display:inline-flex;align-items:center;gap:5px;padding-left:10px;margin-left:4px;border-left:1px solid rgba(255,255,255,.1)}
+.upd-dot{position:absolute;top:5px;left:22px;width:7px;height:7px;background:var(--green);border-radius:50%;border:2px solid var(--bg);animation:updPulse 2s ease-in-out infinite;pointer-events:none}
+.upd-dot.hidden{display:none}
+@keyframes updPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.4);opacity:.6}}
+.iconbtn.upd-avail{color:var(--green)}
+.upd-chip{display:none;align-items:center;gap:5px;background:rgba(0,196,122,.1);border:1px solid rgba(0,196,122,.35);color:#4ade80;border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-mono);letter-spacing:.05em;white-space:nowrap;transition:background .2s,border-color .2s}
+.upd-chip.show{display:flex;animation:chipSlide .3s ease}
+@keyframes chipSlide{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
+.upd-chip:hover{background:rgba(0,196,122,.18);border-color:rgba(0,196,122,.6)}
+.upd-chip-new{font-size:9px;letter-spacing:.1em;opacity:.75}
+
+.upd-panel-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1199;backdrop-filter:blur(2px)}
+.upd-panel-bg.open{display:block}
+.upd-panel{position:fixed;right:-420px;top:0;bottom:0;width:380px;background:var(--panel);border-left:1px solid var(--line-2);z-index:1200;transition:right .3s cubic-bezier(.2,0,.3,1);display:flex;flex-direction:column;box-shadow:-20px 0 60px #0009}
+.upd-panel.open{right:0}
+
+.upd-header{display:flex;align-items:center;gap:12px;padding:18px 16px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
+.upd-logo{width:36px;height:36px;border-radius:8px}
+.upd-title{flex:1}
+.upd-title b{display:block;font-size:13px;color:var(--ink);font-family:var(--font-display)}
+.upd-title span{font-size:11px;color:var(--ink-3);font-family:var(--font-mono)}
+.upd-close{background:none;border:none;color:var(--ink-3);font-size:22px;cursor:pointer;padding:0 4px;line-height:1;transition:color .15s}
+.upd-close:hover{color:var(--ink)}
+
+.upd-body{flex:1;overflow-y:auto;padding:20px 16px;display:flex;flex-direction:column;gap:14px}
+
+.upd-status{display:flex;align-items:center;gap:14px;padding:18px 16px;background:var(--panel-2);border-radius:var(--r);border:1px solid var(--line)}
+.upd-status svg{width:22px;height:22px;flex-shrink:0;color:var(--ink-3)}
+.upd-status.ok svg{color:var(--green)}
+.upd-status div{display:flex;flex-direction:column;gap:3px}
+.upd-status b{font-size:13px;color:var(--ink)}
+.upd-status span{font-size:11px;color:var(--ink-3)}
+.upd-status.checking svg{animation:spin .9s linear infinite}
+
+.upd-versions{display:flex;align-items:center;gap:10px}
+.upd-ver{flex:1;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r);padding:16px 12px;text-align:center}
+.upd-ver.new{border-color:var(--cyan);background:#071826}
+.uv-lbl{display:block;font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+.uv-num{font-size:22px;font-weight:700;font-family:var(--font-mono);color:var(--ink)}
+.upd-ver.new .uv-num{color:var(--cyan);text-shadow:0 0 12px #2ea8e655}
+.upd-arrow{color:var(--cyan);flex-shrink:0;opacity:.7}
+.upd-arrow svg{width:20px;height:20px}
+
+.upd-notes{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r);padding:14px;max-height:150px;overflow-y:auto}
+.upd-notes-ttl{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin-bottom:8px}
+.upd-notes-body{font-size:11.5px;color:var(--ink-2);font-family:var(--font-mono);white-space:pre-wrap;line-height:1.5;margin:0}
+
+.upd-dl-btn{width:100%;justify-content:center;gap:8px}
+.upd-check-btn{background:none;border:1px solid var(--line);color:var(--ink-3);border-radius:var(--r-sm);padding:8px 14px;font-size:12px;cursor:pointer;transition:all .15s;width:100%;font-family:var(--font-ui)}
+.upd-check-btn:hover{border-color:var(--line-2);color:var(--ink)}
+
 /* ===== F1: Monitor de Temperatura ao vivo =================================== */
 .temp-monitor{display:flex;gap:14px;align-items:flex-start;margin-bottom:16px}
 .temp-stats{display:flex;flex-direction:column;gap:8px;min-width:96px}

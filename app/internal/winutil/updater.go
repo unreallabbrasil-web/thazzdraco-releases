@@ -38,6 +38,15 @@ func GetUpdate() *UpdateInfo {
 	return updateInfo
 }
 
+// ForceCheck força uma checagem imediata e atualiza o cache.
+func ForceCheck(currentVersion string) *UpdateInfo {
+	info := fetchUpdate(currentVersion)
+	updateMu.Lock()
+	updateInfo = info
+	updateMu.Unlock()
+	return info
+}
+
 // StartUpdateChecker inicia a goroutine de checagem em background.
 // Primeira checagem ocorre 45s após a inicialização; depois, a cada 4 horas.
 func StartUpdateChecker(currentVersion string) {

@@ -52,11 +52,14 @@ jobs:
           $version = "${{ steps.ver.outputs.VERSION }}"
           $tag = "v$version"
 
-          # Notas de release: lê CHANGELOG.md se existir, senão usa mensagem padrão
-          $notes = "ThazzDraco Optimizer v$version"
-          if (Test-Path "CHANGELOG.md") {
-            $notes = Get-Content "CHANGELOG.md" -Raw
+          # Notas de release: commits desde a tag anterior, ou todo o log se for a 1ª
+          $prevTag = git describe --tags --abbrev=0 HEAD~1 2>$null
+          if ($prevTag) {
+            $lines = git log "$prevTag..HEAD" --format="• %s" 2>$null
+          } else {
+            $lines = git log --format="• %s" -10 2>$null
           }
+          $notes = if ($lines) { ($lines | Where-Object { $_ -match '\S' }) -join "`n" } else { "ThazzDraco Optimizer v$version" }
 
           # Remove release anterior com a mesma tag, se houver
           gh release delete $tag --yes 2>$null

@@ -1326,6 +1326,7 @@ function wire() {
   $("#subMed").onclick = (e) => { const b = e.target.closest("[data-sub]"); if (b) showSub("medicao", b.dataset.sub); };
   $("#btnHist").onclick = () => showPage("historico");
   $("#btnRescan").onclick = () => doScan();
+  $("#btnUpdatePanel").onclick = () => openUpdatePanel();
   // F5: limpar histórico de performance
   const btnPerfClear = $("#btnPerfClear");
   if (btnPerfClear) btnPerfClear.onclick = () => {
@@ -3169,36 +3170,86 @@ function applyPreset(id) {
 }
 
 /* ---- Boot ---------------------------------------------------------------- */
-/* ---- Atualização automática ------------------------------------------------ */
+/* ---- Atualização (painel NVIDIA-style) ------------------------------------ */
+let _appVersion = "";
+let _updateInfo = null;
+
+function applyUpdateBadge(r) {
+  const dot = $("#updDot"), btn = $("#btnUpdatePanel"), chip = $("#updChip"); if (!dot) return;
+  const avail = !!(r && r.available);
+  dot.classList.toggle("hidden", !avail);
+  if (btn) btn.classList.toggle("upd-avail", avail);
+  if (chip) {
+    chip.classList.toggle("show", avail);
+    if (avail) { const vEl = $("#updChipTxt"); if (vEl) vEl.textContent = "v" + (r.version || ""); }
+  }
+}
+
+function openUpdatePanel() {
+  const panel = $("#updPanel"), bg = $("#updPanelBg"); if (!panel) return;
+  const verEl = $("#updCurVer"); if (verEl) verEl.textContent = _appVersion ? "v" + _appVersion : "v—";
+  panel.classList.add("open"); bg.classList.add("open");
+  if (_updateInfo === null) forceCheckUpdate();
+  else renderUpdatePanel();
+}
+
+function closeUpdatePanel() {
+  $("#updPanel")?.classList.remove("open");
+  $("#updPanelBg")?.classList.remove("open");
+}
+
+function renderUpdatePanel() {
+  const body = $("#updBody"); if (!body) return;
+  const r = _updateInfo;
+  if (!r) {
+    body.innerHTML = `<div class="upd-status checking">${IC("ring")}<div><b>Verificando…</b><span>Consultando servidor</span></div></div>
+      <button class="upd-check-btn" onclick="forceCheckUpdate()">Verificar agora</button>`;
+    return;
+  }
+  if (!r.available) {
+    body.innerHTML = `<div class="upd-status ok">${IC("ok")}<div><b>Você está atualizado</b><span>ThazzDraco está na versão mais recente.</span></div></div>
+      <button class="upd-check-btn" onclick="forceCheckUpdate()">Verificar agora</button>`;
+    return;
+  }
+  const curV = _appVersion ? "v" + _appVersion : "—";
+  const newV = "v" + (r.version || "");
+  const notes = (r.notes || "").split("\n").filter(l => l.trim()).slice(0, 10).join("\n");
+  body.innerHTML = `
+    <div class="upd-versions">
+      <div class="upd-ver cur"><span class="uv-lbl">Instalada</span><b class="uv-num">${escHtml(curV)}</b></div>
+      <div class="upd-arrow">${IC("update")}</div>
+      <div class="upd-ver new"><span class="uv-lbl">Disponível</span><b class="uv-num">${escHtml(newV)}</b></div>
+    </div>
+    ${notes ? `<div class="upd-notes"><div class="upd-notes-ttl">Novidades</div><pre class="upd-notes-body">${escHtml(notes)}</pre></div>` : ""}
+    <button class="btn-hero upd-dl-btn" id="updDlBtn">${IC("update")} Baixar ${escHtml(newV)}</button>
+    <button class="upd-check-btn" onclick="forceCheckUpdate()">Verificar agora</button>`;
+  const dlBtn = $("#updDlBtn");
+  if (dlBtn && r.download_url) dlBtn.onclick = () => window.open(r.download_url, "_blank");
+}
+
+async function forceCheckUpdate() {
+  const body = $("#updBody");
+  if (body) body.innerHTML = `<div class="upd-status checking">${IC("ring")}<div><b>Verificando…</b><span>Consultando GitHub</span></div></div>`;
+  try {
+    const r = await api("/api/update/check?force=1");
+    _updateInfo = r; applyUpdateBadge(r); renderUpdatePanel();
+  } catch { renderUpdatePanel(); }
+}
+
 async function checkForUpdate() {
   try {
     const r = await api("/api/update/check");
-    if (!r.available) return;
-    const banner = $("#updateBanner"); if (!banner) return;
-    const vEl = $("#updateVersion"), nEl = $("#updateNotes");
-    if (vEl) vEl.textContent = r.version || "";
-    if (nEl && r.notes) {
-      // pega só a primeira linha das notas de release
-      const firstLine = r.notes.split("\n").find(l => l.trim()) || "";
-      nEl.textContent = firstLine.replace(/^#+\s*/, "");
-    }
-    banner.classList.remove("hidden");
-    const btn = $("#btnUpdateDownload");
-    if (btn) btn.onclick = () => {
-      if (r.download_url) window.open(r.download_url, "_blank");
-    };
-    const dismiss = $("#btnUpdateDismiss");
-    if (dismiss) dismiss.onclick = () => banner.classList.add("hidden");
+    _updateInfo = r; applyUpdateBadge(r);
+    if (r.available && $("#updPanel")?.classList.contains("open")) renderUpdatePanel();
   } catch {}
 }
 
-// Checa na abertura (45s de delay no backend) e a cada 15 min na UI
 function scheduleUpdateCheck() {
-  // primeira checagem: pergunta ao backend após 60s (ele já iniciou a busca 45s antes)
+  // Primeira checagem forçada em 8s (ignora cache do Go, vai direto ao GitHub)
   setTimeout(async () => {
-    await checkForUpdate();
+    try { const r = await api("/api/update/check?force=1"); _updateInfo = r; applyUpdateBadge(r); } catch {}
     setInterval(checkForUpdate, 15 * 60 * 1000);
-  }, 60_000);
+  }, 8_000);
 }
 
 async function boot() {
@@ -3214,7 +3265,7 @@ async function boot() {
     const es = new EventSource("/api/heartbeat");
     es.onerror = () => { es.close(); setTimeout(hb, 3000); };
   })();
-  try { const info = await api("/api/info"); const b = $("#adminBadge"); state.admin = !!info.admin;
+  try { const info = await api("/api/info"); _appVersion = info.versao || ""; const b = $("#adminBadge"); state.admin = !!info.admin;
     if (info.admin) b.innerHTML = `<span class="dot"></span> Administrador · v${info.versao}`;
     else { b.classList.add("warn"); b.innerHTML = `<span class="dot"></span> Sem admin · v${info.versao}`; $("#noadmin").classList.add("show"); }
     const bv = $("#buildVer");

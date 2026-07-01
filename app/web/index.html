@@ -10,16 +10,6 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<!-- banner de atualização (oculto até ter versão nova) -->
-<div id="updateBanner" class="update-banner hidden">
-  <span class="update-icon">⚡</span>
-  <div class="update-text">
-    <b>Atualização disponível</b> — v<span id="updateVersion"></span>
-    <span id="updateNotes" class="update-notes"></span>
-  </div>
-  <button class="btn-update" id="btnUpdateDownload">Baixar agora</button>
-  <button class="btn-dismiss-update" id="btnUpdateDismiss" title="Fechar">✕</button>
-</div>
 <!-- atmosfera -->
 <div class="bg-layers">
   <div class="storm"></div>
@@ -52,6 +42,14 @@
       <button class="iconbtn" id="btnOverlay" title="Overlay minimalista — métricas em janela flutuante"><span data-icon="overlay"></span></button>
       <button class="iconbtn" id="btnPerf" title="Modo performance (reduz efeitos)"><span data-icon="perf"></span></button>
       <button class="iconbtn" id="btnRescan" title="Reescanear"><span data-icon="scan"></span></button>
+      <div class="upd-btn-wrap">
+        <button class="iconbtn" id="btnUpdatePanel" title="Atualizações"><span data-icon="update"></span></button>
+        <span class="upd-dot hidden" id="updDot"></span>
+        <button class="upd-chip" id="updChip" onclick="openUpdatePanel()">
+          <span class="upd-chip-new">NOVA</span>
+          <span id="updChipTxt">v—</span>
+        </button>
+      </div>
       <span class="badge" id="adminBadge"><span class="dot"></span> …</span>
     </div>
   </header>
@@ -482,6 +480,20 @@
     <button class="mbtn primary" id="reportPrint"><span data-icon="print"></span> Salvar PDF / Imprimir</button>
   </div>
   <div class="report-scroll"><div class="report-paper" id="reportArea"></div></div>
+</div>
+
+<!-- ===== Painel de Atualização (NVIDIA-style) ===== -->
+<div id="updPanelBg" class="upd-panel-bg" onclick="closeUpdatePanel()"></div>
+<div id="updPanel" class="upd-panel">
+  <div class="upd-header">
+    <img src="logo.png" alt="" class="upd-logo" onerror="this.style.display='none'">
+    <div class="upd-title">
+      <b>ThazzDraco Optimizer</b>
+      <span id="updCurVer">v—</span>
+    </div>
+    <button class="upd-close" onclick="closeUpdatePanel()" aria-label="Fechar">×</button>
+  </div>
+  <div id="updBody" class="upd-body"></div>
 </div>
 
 <!-- ===== Painel por jogo ===== -->

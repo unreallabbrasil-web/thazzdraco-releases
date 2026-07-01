@@ -48,6 +48,7 @@
     gamepad: S('<rect x="2" y="7" width="20" height="10" rx="4"/><path d="M7 11v2M6 12h2"/><circle cx="15.5" cy="11.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="13.5" r=".6" fill="currentColor"/>'),
     refresh: S('<path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.5 9A9 9 0 0 0 5.2 5.2L1 10M23 14l-4.2 4.8A9 9 0 0 1 3.5 15"/>'),
     overlay: S('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M8 9h2M10 9v2"/><path d="M14 10h4M14 12h3"/>'),
+    update: S('<path d="M12 2v13M7 10l5 6 5-6"/><path d="M3 20h18"/>'),
   };
 
   window.ICONS = ICONS;
