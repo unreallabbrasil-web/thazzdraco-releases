@@ -3200,7 +3200,10 @@ function renderDriverAuditRows(drivers, wuaUpdates) {
     } else if (d.cat === "GPU" && /nvidia/i.test(d.nome)) {
       action = `<button class="drv-nvlink-sm" data-nvlink2="${escHtml(d.nome)}">Ver na NVIDIA →</button>`;
     } else {
-      action = `<span class="drv-noupdate">Sem atualização encontrada</span>`;
+      // Windows Update raramente cataloga driver de GPU/áudio/rede (fabricantes
+      // distribuem pelo app próprio deles) — em vez de beco sem saída, busca de
+      // verdade no site do fabricante certo (ou busca geral como último recurso).
+      action = `<button class="drv-nvlink-sm" data-drvsearch="${escHtml(d.nome)}">Buscar driver mais recente →</button>`;
     }
     return `<div class="drv-row">
       <div class="drv-meta">
@@ -3233,6 +3236,20 @@ function renderDriverAuditRows(drivers, wuaUpdates) {
       finally { btn.disabled = false; btn.textContent = orig; }
     };
   });
+  $$("#drvList [data-drvsearch]").forEach((btn) => {
+    btn.onclick = () => window.open(driverSearchURL(btn.dataset.drvsearch), "_blank");
+  });
+}
+
+// Windows Update raramente tem driver de GPU/áudio/rede catalogado (os
+// fabricantes distribuem pelo app próprio deles) — quando não achamos update
+// real, manda pra um lugar de verdade em vez de deixar a linha sem ação.
+// AMD/Intel têm página oficial de driver; o resto cai numa busca direta.
+function driverSearchURL(nome) {
+  const n = (nome || "").toLowerCase();
+  if (/\bamd\b|\bradeon\b|\bati\b/.test(n)) return "https://www.amd.com/en/support/download/drivers.html";
+  if (/\bintel\b/.test(n)) return "https://www.intel.com/content/www/us/en/support/detect.html";
+  return "https://www.bing.com/search?q=" + encodeURIComponent(nome + " driver download");
 }
 
 function installSingleDriverUpdate(btn) {
