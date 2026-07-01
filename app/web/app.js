@@ -2075,7 +2075,8 @@ async function runRepair() {
   if (!etapas.length) return toast("warn", "Selecione uma etapa", "Marque ao menos um reparo.");
   confirmModal({
     title: "Iniciar reparo do Windows?",
-    body: `<p>Vai rodar <b>${etapas.length} etapa(s)</b> de reparo do Windows. <b>Não apaga dados</b>, mas pode levar de 5 a 30 min — evite desligar o PC. Recomendado ter <b>backup</b> antes.</p>`,
+    body: `<p>Vai rodar <b>${etapas.length} etapa(s)</b> de reparo do Windows. <b>Não apaga dados</b>, mas pode levar de 5 a 30 min — evite desligar o PC. Recomendado ter <b>backup</b> antes.</p>
+      <p style="color:var(--ink-3);font-size:12.5px">Algumas etapas (DISM/reset do Windows Update) só valem <b>depois de reiniciar</b> — combine isso com o cliente antes de começar.</p>`,
     okLabel: "Iniciar reparo",
     onOk: async () => {
       const btn = $("#btnRepair"); if (btn) btn.disabled = true;
@@ -3304,7 +3305,13 @@ function renderUpdatePanel() {
     <button class="btn-hero upd-dl-btn" id="updDlBtn">${IC("update")} Instalar ${escHtml(newV)}</button>
     <button class="upd-check-btn" onclick="forceCheckUpdate()">Verificar agora</button>`;
   const dlBtn = $("#updDlBtn");
-  if (dlBtn) dlBtn.onclick = () => { dlBtn.disabled = true; startInstall(r); };
+  if (dlBtn) dlBtn.onclick = () => {
+    confirmModal({
+      title: "Instalar " + newV + "?",
+      body: `<p>Baixa a nova versão e aplica sozinho: <b>a janela do ThazzDraco vai fechar e reabrir automaticamente</b> em alguns segundos. Não feche pela metade — espere reabrir.</p>`,
+      okLabel: "Instalar", onOk: () => { dlBtn.disabled = true; startInstall(r); },
+    });
+  };
 }
 
 async function startInstall(updateInfo) {
