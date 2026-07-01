@@ -220,17 +220,30 @@ func SelfReplaceAndRestart(newExe string) error {
 	bak := selfExe + ".old"
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+	// Espera o processo atual sair, troca o exe (com rollback se falhar) e reabre.
+	// Usa Move-Item (não Rename-Item) porque Rename-Item -NewName rejeita caminho
+	// completo no Windows PowerShell 5.1.
 	ps := fmt.Sprintf(`
 $ErrorActionPreference = 'SilentlyContinue'
-Start-Sleep -Milliseconds 700
+Start-Sleep -Milliseconds 900
 $self = '%s'
 $new  = '%s'
 $bak  = '%s'
-Rename-Item -Path $self -NewName $bak  -Force
-Copy-Item   -Path $new  -Destination $self -Force
+if (Test-Path $bak) { Remove-Item $bak -Force }
+$ok = $false
+for ($i = 0; $i -lt 20; $i++) {
+  Move-Item -Path $self -Destination $bak -Force -ErrorAction SilentlyContinue
+  if (-not (Test-Path $self)) { $ok = $true; break }
+  Start-Sleep -Milliseconds 300
+}
+if ($ok) {
+  Copy-Item -Path $new -Destination $self -Force
+  if (-not (Test-Path $self)) { Move-Item -Path $bak -Destination $self -Force }  # rollback
+}
 Start-Process -FilePath $self
-Remove-Item $bak -Force
-Remove-Item $new -Force
+Start-Sleep -Milliseconds 600
+Remove-Item $bak -Force -ErrorAction SilentlyContinue
+Remove-Item $new -Force -ErrorAction SilentlyContinue
 `, esc(selfExe), esc(newExe), esc(bak))
 
 	cmd := exec.Command("powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps)
