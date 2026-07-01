@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,8 +20,11 @@ import (
 	"thazzdraco/internal/winutil"
 )
 
-// Version e a versao do app (nova era Go nativa).
-const Version = "4.0.0"
+//go:embed VERSION
+var _versionRaw string
+
+// Version e injetado em tempo de compilação a partir do arquivo VERSION.
+var Version = strings.TrimSpace(_versionRaw)
 
 //go:embed all:web
 var webFiles embed.FS

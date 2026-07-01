@@ -3232,24 +3232,44 @@ async function forceCheckUpdate() {
   if (body) body.innerHTML = `<div class="upd-status checking">${IC("ring")}<div><b>Verificando…</b><span>Consultando GitHub</span></div></div>`;
   try {
     const r = await api("/api/update/check?force=1");
-    _updateInfo = r; applyUpdateBadge(r); renderUpdatePanel();
-  } catch { renderUpdatePanel(); }
+    if (r && !r.pending) { _updateInfo = r; applyUpdateBadge(r); renderUpdatePanel(); }
+    else {
+      // GitHub inacessível no momento — mostra retry em vez de spinner infinito
+      if (body) body.innerHTML = `<div class="upd-status">${IC("warn")}<div><b>Sem resposta</b><span>GitHub indisponível agora.</span></div></div>
+        <button class="upd-check-btn" onclick="forceCheckUpdate()">Tentar novamente</button>`;
+    }
+  } catch {
+    if (body) body.innerHTML = `<div class="upd-status">${IC("warn")}<div><b>Erro de conexão</b><span>Verifique sua internet.</span></div></div>
+      <button class="upd-check-btn" onclick="forceCheckUpdate()">Tentar novamente</button>`;
+  }
 }
 
 async function checkForUpdate() {
   try {
     const r = await api("/api/update/check");
-    _updateInfo = r; applyUpdateBadge(r);
-    if (r.available && $("#updPanel")?.classList.contains("open")) renderUpdatePanel();
+    if (r && !r.pending) { // pending=true = Go ainda não terminou a checagem inicial
+      _updateInfo = r; applyUpdateBadge(r);
+      if (r.available && $("#updPanel")?.classList.contains("open")) renderUpdatePanel();
+    }
   } catch {}
 }
 
 function scheduleUpdateCheck() {
-  // Primeira checagem forçada em 8s (ignora cache do Go, vai direto ao GitHub)
-  setTimeout(async () => {
-    try { const r = await api("/api/update/check?force=1"); _updateInfo = r; applyUpdateBadge(r); } catch {}
-    setInterval(checkForUpdate, 15 * 60 * 1000);
-  }, 8_000);
+  // Polling a cada 5s até ter um resultado definitivo (Go checa em ~5s)
+  // Máximo de 24 tentativas = 2 minutos. Depois passa para intervalo de 15min.
+  let n = 0;
+  const t = setInterval(async () => {
+    n++;
+    if (n > 24) { clearInterval(t); setInterval(checkForUpdate, 15 * 60 * 1000); return; }
+    try {
+      const r = await api("/api/update/check");
+      if (r && !r.pending) {
+        _updateInfo = r; applyUpdateBadge(r);
+        clearInterval(t);
+        setInterval(checkForUpdate, 15 * 60 * 1000);
+      }
+    } catch {}
+  }, 5_000);
 }
 
 async function boot() {

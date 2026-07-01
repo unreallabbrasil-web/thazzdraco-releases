@@ -19,8 +19,6 @@ type UpdateInfo struct {
 	DownloadURL string `json:"download_url"`
 }
 
-// UpdateOwner e UpdateRepo: preencha com seu usuário e repositório do GitHub.
-// Altere aqui uma única vez após criar o repo e o sistema funciona automaticamente.
 const (
 	UpdateOwner = "unreallabbrasil-web"
 	UpdateRepo  = "thazzdraco-releases"
@@ -31,35 +29,42 @@ var (
 	updateInfo *UpdateInfo
 )
 
-// GetUpdate retorna o resultado da última checagem (nil = sem novidade ainda).
+// GetUpdate retorna o resultado da última checagem (nil = ainda não checou).
 func GetUpdate() *UpdateInfo {
 	updateMu.RLock()
 	defer updateMu.RUnlock()
 	return updateInfo
 }
 
-// ForceCheck força uma checagem imediata e atualiza o cache.
+// ForceCheck força uma checagem imediata. Em caso de erro de rede, preserva o
+// cache existente e o retorna — assim o badge não desaparece por falha temporária.
 func ForceCheck(currentVersion string) *UpdateInfo {
-	info := fetchUpdate(currentVersion)
-	updateMu.Lock()
-	updateInfo = info
-	updateMu.Unlock()
-	return info
+	info, ok := fetchUpdate(currentVersion)
+	if ok {
+		updateMu.Lock()
+		updateInfo = info
+		updateMu.Unlock()
+		return info
+	}
+	// Erro de rede: retorna o cache sem sobrescrever
+	updateMu.RLock()
+	defer updateMu.RUnlock()
+	return updateInfo
 }
 
 // StartUpdateChecker inicia a goroutine de checagem em background.
-// Primeira checagem ocorre 45s após a inicialização; depois, a cada 4 horas.
+// Primeira checagem ocorre 5s após a inicialização; depois, a cada 4 horas.
 func StartUpdateChecker(currentVersion string) {
 	go func() {
-		time.Sleep(45 * time.Second)
-		if info := fetchUpdate(currentVersion); info != nil {
+		time.Sleep(5 * time.Second)
+		if info, ok := fetchUpdate(currentVersion); ok {
 			updateMu.Lock()
 			updateInfo = info
 			updateMu.Unlock()
 		}
 		ticker := time.NewTicker(4 * time.Hour)
 		for range ticker.C {
-			if info := fetchUpdate(currentVersion); info != nil {
+			if info, ok := fetchUpdate(currentVersion); ok {
 				updateMu.Lock()
 				updateInfo = info
 				updateMu.Unlock()
@@ -69,18 +74,24 @@ func StartUpdateChecker(currentVersion string) {
 }
 
 // fetchUpdate consulta a GitHub Releases API e compara versões.
-func fetchUpdate(current string) *UpdateInfo {
+// Retorna (nil, false) em caso de erro de rede/parse — o segundo valor indica sucesso.
+// Retorna (&UpdateInfo{Available:false}, true) quando não há versão mais nova.
+// Retorna (&UpdateInfo{Available:true,...}, true) quando há update disponível.
+func fetchUpdate(current string) (*UpdateInfo, bool) {
 	if UpdateOwner == "SEU_USUARIO_GITHUB" {
-		return nil // repo nao configurado
+		return &UpdateInfo{Available: false}, true
 	}
 	url := "https://api.github.com/repos/" + UpdateOwner + "/" + UpdateRepo + "/releases/latest"
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, _ := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, false
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != 200 {
-		return nil
+		return nil, false // erro de rede
 	}
 	defer resp.Body.Close()
 
@@ -93,12 +104,12 @@ func fetchUpdate(current string) *UpdateInfo {
 		} `json:"assets"`
 	}
 	if json.NewDecoder(resp.Body).Decode(&release) != nil {
-		return nil
+		return nil, false // erro de parse
 	}
 
 	remote := strings.TrimPrefix(release.TagName, "v")
 	if !isNewer(remote, current) {
-		return nil
+		return &UpdateInfo{Available: false}, true
 	}
 
 	downloadURL := ""
@@ -114,7 +125,7 @@ func fetchUpdate(current string) *UpdateInfo {
 		Version:     remote,
 		Notes:       release.Body,
 		DownloadURL: downloadURL,
-	}
+	}, true
 }
 
 // isNewer retorna true se remote > current (comparação semver simplificada).
