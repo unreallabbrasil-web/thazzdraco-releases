@@ -2192,6 +2192,24 @@ function undervoltGuide() {
 
 /* ---- Limpeza profunda ---------------------------------------------------- */
 function fmtCleanMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
+
+// Conta itens marcados dentro de um container .sel-row e atualiza o texto do
+// botão — padrão compartilhado por Debloat, Limpeza profunda e Browser Cleaner
+// (as 3 telas de "selecionar itens e limpar"). Se os checkboxes tiverem
+// data-mb, soma e mostra o tamanho; senão mostra a contagem.
+function updateSelCount(boxSel, btnSel, verb) {
+  const box = $(boxSel), btn = $(btnSel); if (!box || !btn) return;
+  const checked = $$(boxSel + " input[type=checkbox]:checked");
+  const n = checked.length;
+  const comMb = checked.filter((c) => c.dataset.mb !== undefined);
+  if (comMb.length) {
+    const mb = comMb.reduce((s, c) => s + (parseFloat(c.dataset.mb) || 0), 0);
+    btn.innerHTML = `${IC("broom")} ${verb} selecionados (${fmtCleanMB(mb)})`;
+  } else {
+    btn.innerHTML = `${IC("broom")} ${verb} ${n} selecionado${n === 1 ? "" : "s"}`;
+  }
+}
+
 async function renderDeepClean() {
   const box = $("#deepBox"); if (!box) return;
   box.innerHTML = `<div class="empty" style="padding:24px">${IC("ring")}<div>Calculando o que dá para limpar…</div></div>`;
@@ -2199,20 +2217,14 @@ async function renderDeepClean() {
   state.deep = d.categorias || [];
   if (!state.deep.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nada relevante para limpeza profunda — já está enxuto.</div></div>`; $("#deepActions").style.display = "none"; return; }
   box.innerHTML = state.deep.map((c, i) => `
-    <label class="deep-row${c.aviso ? " warn" : ""}">
-      <input type="checkbox" data-deep="${i}" ${c.recomendado ? "checked" : ""}>
-      <div class="dc-body"><div class="dc-top"><b>${escHtml(c.nome)}</b><span class="dc-mb">${fmtCleanMB(c.mb)}</span></div>
-        <span class="dc-desc">${escHtml(c.descricao)}</span>
-        ${c.aviso ? `<span class="dc-aviso">${IC("warn")} ${escHtml(c.aviso)}</span>` : ""}</div>
+    <label class="sel-row${c.aviso ? " warn" : ""}">
+      <input type="checkbox" data-deep="${i}" data-mb="${c.mb}" ${c.recomendado ? "checked" : ""}>
+      <div class="sel-body"><div class="sel-top"><b>${escHtml(c.nome)}</b><span class="sel-mb">${fmtCleanMB(c.mb)}</span></div>
+        <span class="sel-desc">${escHtml(c.descricao)}</span>
+        ${c.aviso ? `<span class="sel-warn">${IC("warn")} ${escHtml(c.aviso)}</span>` : ""}</div>
     </label>`).join("");
-  $$("#deepBox [data-icon]").forEach((el) => { const ic = IC(el.dataset.icon); if (ic) el.innerHTML = ic; });
   $("#deepActions").style.display = "";
-  box.onchange = updateDeepCount; updateDeepCount();
-}
-function updateDeepCount() {
-  const sel = $$("#deepBox input:checked").map((c) => state.deep[+c.dataset.deep]).filter(Boolean);
-  const mb = sel.reduce((s, c) => s + c.mb, 0);
-  const b = $("#btnDeep"); if (b) b.innerHTML = `${IC("broom")} Limpar selecionados (${fmtCleanMB(mb)})`;
+  box.onchange = () => updateSelCount("#deepBox", "#btnDeep", "Limpar"); updateSelCount("#deepBox", "#btnDeep", "Limpar");
 }
 function runDeepClean() {
   const sel = $$("#deepBox input:checked").map((c) => state.deep[+c.dataset.deep]).filter(Boolean);
@@ -2243,21 +2255,15 @@ async function renderBloat() {
   const byCat = {};
   state.bloat.forEach((a, i) => { (byCat[a.categoria] = byCat[a.categoria] || []).push({ a, i }); });
   box.innerHTML = Object.entries(byCat).map(([cat, items]) => `
-    <div class="bloat-cat"><div class="bloat-cat-h">${escHtml(cat)}</div>
-      ${items.map(({ a, i }) => `<label class="bloat-row">
+    <div class="sel-group"><div class="sel-group-h">${escHtml(cat)}</div>
+      ${items.map(({ a, i }) => `<label class="sel-row">
         <input type="checkbox" data-bloat="${i}" ${a.recomendado ? "checked" : ""}>
-        <span class="bl-nome">${escHtml(a.nome)}</span>
-        ${a.nota ? `<span class="bl-nota" title="${escHtml(a.nota)}">${IC("warn")}</span>` : ""}
+        <div class="sel-body"><div class="sel-top"><b>${escHtml(a.nome)}</b></div>
+          ${a.nota ? `<span class="sel-note">${IC("warn")} ${escHtml(a.nota)}</span>` : ""}</div>
       </label>`).join("")}
     </div>`).join("");
-  $$("#bloatBox [data-icon]").forEach((el) => { const ic = IC(el.dataset.icon); if (ic) el.innerHTML = ic; });
   $("#bloatActions").style.display = "";
-  updateBloatCount();
-  box.onchange = updateBloatCount;
-}
-function updateBloatCount() {
-  const n = $$("#bloatBox input:checked").length;
-  const b = $("#btnBloat"); if (b) b.innerHTML = `${IC("broom")} Remover ${n} selecionado${n === 1 ? "" : "s"}`;
+  box.onchange = () => updateSelCount("#bloatBox", "#btnBloat", "Remover"); updateSelCount("#bloatBox", "#btnBloat", "Remover");
 }
 function removeBloat() {
   const sel = $$("#bloatBox input:checked").map((c) => state.bloat[+c.dataset.bloat]).filter(Boolean);
@@ -2447,21 +2453,21 @@ function renderBrowserClean() {
 
 function renderBrowserGrid(browsers) {
   const grid = $("#browserGrid"); if (!grid) return;
-  const icons = { chrome: "🌐", edge: "🔵", brave: "🦁", firefox: "🦊" };
   grid.innerHTML = browsers.map(b => {
-    if (!b.detectado) return `<div class="browser-card browser-card-off"><div class="bc-head">${icons[b.id] || "🌐"} <b>${escHtml(b.nome)}</b></div><p class="bc-none">Não detectado</p></div>`;
+    if (!b.detectado) return `<div class="browser-card browser-card-off"><div class="bc-head">${IC("browser")} <b>${escHtml(b.nome)}</b></div><p class="bc-none">Não detectado</p></div>`;
     const cats = (b.cats || []).map(c => `
       <label class="bc-cat">
-        <input type="checkbox" class="browser-cat-chk" data-browser="${b.id}" data-cat="${c.id}" ${c.mb > 0 ? "checked" : ""}>
-        <span class="bc-cat-name">${escHtml(c.nome)}</span>
-        <span class="bc-cat-mb">${fmtCleanMB(c.mb)}</span>
-        ${c.nota ? `<small class="bc-cat-nota">${escHtml(c.nota)}</small>` : ""}
+        <input type="checkbox" class="browser-cat-chk" data-browser="${b.id}" data-cat="${c.id}" data-mb="${c.mb}" ${c.mb > 0 ? "checked" : ""}>
+        <div class="sel-top"><b>${escHtml(c.nome)}</b><span class="sel-mb">${fmtCleanMB(c.mb)}</span></div>
+        ${c.nota ? `<span class="sel-note">${escHtml(c.nota)}</span>` : ""}
       </label>`).join("");
     return `<div class="browser-card">
-      <div class="bc-head">${icons[b.id] || "🌐"} <b>${escHtml(b.nome)}</b> <span class="bc-total">${fmtCleanMB(b.total_mb)}</span></div>
+      <div class="bc-head">${IC("browser")} <b>${escHtml(b.nome)}</b> <span class="bc-total">${fmtCleanMB(b.total_mb)}</span></div>
       <div class="bc-cats">${cats}</div>
     </div>`;
   }).join("");
+  grid.onchange = () => updateSelCount("#browserGrid", "#btnBrowserClean", "Limpar");
+  updateSelCount("#browserGrid", "#btnBrowserClean", "Limpar");
 }
 
 /* ---- Pinger --------------------------------------------------------------- */

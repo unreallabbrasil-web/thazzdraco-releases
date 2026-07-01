@@ -49,6 +49,7 @@
     refresh: S('<path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.5 9A9 9 0 0 0 5.2 5.2L1 10M23 14l-4.2 4.8A9 9 0 0 1 3.5 15"/>'),
     overlay: S('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M8 9h2M10 9v2"/><path d="M14 10h4M14 12h3"/>'),
     update: S('<path d="M12 2v13M7 10l5 6 5-6"/><path d="M3 20h18"/>'),
+    browser: S('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8h20"/><circle cx="5.5" cy="6" r=".6" fill="currentColor"/><circle cx="8" cy="6" r=".6" fill="currentColor"/>'),
   };
 
   window.ICONS = ICONS;
