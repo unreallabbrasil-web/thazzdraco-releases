@@ -3221,10 +3221,60 @@ function renderUpdatePanel() {
       <div class="upd-ver new"><span class="uv-lbl">Disponível</span><b class="uv-num">${escHtml(newV)}</b></div>
     </div>
     ${notes ? `<div class="upd-notes"><div class="upd-notes-ttl">Novidades</div><pre class="upd-notes-body">${escHtml(notes)}</pre></div>` : ""}
-    <button class="btn-hero upd-dl-btn" id="updDlBtn">${IC("update")} Baixar ${escHtml(newV)}</button>
+    <button class="btn-hero upd-dl-btn" id="updDlBtn">${IC("update")} Instalar ${escHtml(newV)}</button>
     <button class="upd-check-btn" onclick="forceCheckUpdate()">Verificar agora</button>`;
   const dlBtn = $("#updDlBtn");
-  if (dlBtn && r.download_url) dlBtn.onclick = () => window.open(r.download_url, "_blank");
+  if (dlBtn) dlBtn.onclick = () => startInstall(r);
+}
+
+async function startInstall(updateInfo) {
+  const body = $("#updBody"); if (!body) return;
+  const newV = "v" + (updateInfo.version || "");
+  const curV = _appVersion ? "v" + _appVersion : "—";
+
+  body.innerHTML = `
+    <div class="upd-versions">
+      <div class="upd-ver cur"><span class="uv-lbl">Instalada</span><b class="uv-num">${escHtml(curV)}</b></div>
+      <div class="upd-arrow">${IC("update")}</div>
+      <div class="upd-ver new"><span class="uv-lbl">Disponível</span><b class="uv-num">${escHtml(newV)}</b></div>
+    </div>
+    <div class="upd-dl-progress">
+      <div class="upd-dl-bar-wrap"><div class="upd-dl-bar" id="updDlBar" style="width:0%"></div></div>
+      <div class="upd-dl-txt" id="updDlTxt">Iniciando download…</div>
+    </div>`;
+
+  try { await api("/api/update/install", {}); }
+  catch (e) {
+    body.innerHTML = `<div class="upd-status">${IC("err")}<div><b>Erro ao iniciar</b><span>${escHtml(String(e))}</span></div></div>
+      <button class="upd-check-btn" onclick="renderUpdatePanel()">Voltar</button>`;
+    return;
+  }
+
+  const poll = setInterval(async () => {
+    try {
+      const p = await api("/api/update/progress");
+      const bar = $("#updDlBar"), txt = $("#updDlTxt");
+      if (p.status === "downloading") {
+        const pct = p.total > 0 ? Math.round(p.downloaded / p.total * 100) : 0;
+        const mb = (p.downloaded / 1048576).toFixed(1);
+        const tot = p.total > 0 ? " / " + (p.total / 1048576).toFixed(1) + " MB" : "";
+        if (bar) bar.style.width = pct + "%";
+        if (txt) txt.textContent = `Baixando… ${mb} MB${tot} (${pct}%)`;
+      }
+      if (p.status === "ready") {
+        clearInterval(poll);
+        if (bar) bar.style.width = "100%";
+        if (txt) txt.textContent = "Aplicando atualização…";
+        await api("/api/update/apply", {});
+        body.innerHTML = `<div class="upd-status ok">${IC("ok")}<div><b>Atualizado!</b><span>O app vai reiniciar em instantes…</span></div></div>`;
+      }
+      if (p.status === "error") {
+        clearInterval(poll);
+        body.innerHTML = `<div class="upd-status">${IC("err")}<div><b>Erro no download</b><span>${escHtml(p.error || "Tente novamente")}</span></div></div>
+          <button class="upd-check-btn" onclick="renderUpdatePanel()">Voltar</button>`;
+      }
+    } catch { /* ignora erros de poll durante o restart */ }
+  }, 500);
 }
 
 async function forceCheckUpdate() {

@@ -4,10 +4,16 @@ package winutil
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -155,4 +161,87 @@ func semverParts(v string) [3]int {
 		out[i] = n
 	}
 	return out
+}
+
+/* ---------- download + self-replace --------------------------------------- */
+
+// DownloadExe baixa o exe de url para um arquivo temporário.
+// progress(downloaded, total) é chamado a cada chunk; total pode ser -1.
+func DownloadExe(url string, progress func(int64, int64)) (string, error) {
+	tmp, err := os.CreateTemp("", "ThazzDraco_update_*.exe")
+	if err != nil {
+		return "", fmt.Errorf("criar temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Get(url)
+	if err != nil {
+		tmp.Close(); os.Remove(tmpPath)
+		return "", fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	total := resp.ContentLength
+	var downloaded int64
+	buf := make([]byte, 64*1024)
+	for {
+		n, rerr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, we := tmp.Write(buf[:n]); we != nil {
+				tmp.Close(); os.Remove(tmpPath)
+				return "", fmt.Errorf("gravar: %w", we)
+			}
+			downloaded += int64(n)
+			if progress != nil {
+				progress(downloaded, total)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			tmp.Close(); os.Remove(tmpPath)
+			return "", fmt.Errorf("leitura: %w", rerr)
+		}
+	}
+	tmp.Close()
+	return tmpPath, nil
+}
+
+// SelfReplaceAndRestart substitui o exe em execução pelo novo e reinicia o app.
+// Lança um script PowerShell detachado que faz a troca após o processo sair.
+func SelfReplaceAndRestart(newExe string) error {
+	selfExe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("detectar exe: %w", err)
+	}
+	selfExe = filepath.Clean(selfExe)
+	bak := selfExe + ".old"
+
+	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
+	ps := fmt.Sprintf(`
+$ErrorActionPreference = 'SilentlyContinue'
+Start-Sleep -Milliseconds 700
+$self = '%s'
+$new  = '%s'
+$bak  = '%s'
+Rename-Item -Path $self -NewName $bak  -Force
+Copy-Item   -Path $new  -Destination $self -Force
+Start-Process -FilePath $self
+Remove-Item $bak -Force
+Remove-Item $new -Force
+`, esc(selfExe), esc(newExe), esc(bak))
+
+	cmd := exec.Command("powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("lançar updater: %w", err)
+	}
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		os.Exit(0)
+	}()
+	return nil
 }
