@@ -197,7 +197,7 @@ func vramInit() {
 	}
 	r1, _, _ := pPdhAddEng.Call(vramQuery, uintptr(unsafe.Pointer(pathUsed)), 0, uintptr(unsafe.Pointer(&vramUsedCounter)))
 	r2, _, _ := pPdhAddEng.Call(vramQuery, uintptr(unsafe.Pointer(pathTot)), 0, uintptr(unsafe.Pointer(&vramTotCounter)))
-	if r1 != 0 && r2 != 0 {
+	if r1 != 0 || r2 != 0 {
 		pPdhClose.Call(vramQuery)
 		return
 	}

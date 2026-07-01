@@ -118,8 +118,17 @@ func ResolveCoverURL(name string) string {
 
 // ResolveCoverURLs resolve capas para uma lista de jogos sem cover_url em paralelo,
 // com timeout global de 6 segundos. Modifica os elementos no slice passado.
+//
+// As goroutines NUNCA escrevem direto em games[i] — cada uma manda seu resultado
+// por um channel, e só a goroutine chamadora (esta função) grava em games, só
+// para os jobs que respondem antes do timeout. Isso evita que uma goroutine
+// atrasada escreva no slice depois que a função já retornou (o slice pode estar
+// sendo serializado para JSON nesse momento pelo handler HTTP).
 func ResolveCoverURLs(games []Game) {
-	type job struct{ i int; name string }
+	type job struct {
+		i    int
+		name string
+	}
 	var jobs []job
 	for i, g := range games {
 		if g.CoverURL == "" {
@@ -129,23 +138,30 @@ func ResolveCoverURLs(games []Game) {
 	if len(jobs) == 0 {
 		return
 	}
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4) // max 4 requisicoes simultaneas
+
+	type result struct {
+		i   int
+		url string
+	}
+	results := make(chan result, len(jobs)) // buffered: goroutines atrasadas nao travam
+	sem := make(chan struct{}, 4)           // max 4 requisicoes simultaneas
 	for _, j := range jobs {
-		wg.Add(1)
 		go func(idx int, name string) {
-			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if u := ResolveCoverURL(name); u != "" {
-				games[idx].CoverURL = u
-			}
+			results <- result{idx, ResolveCoverURL(name)}
 		}(j.i, j.name)
 	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(6 * time.Second):
+
+	deadline := time.After(6 * time.Second)
+	for range jobs {
+		select {
+		case r := <-results:
+			if r.url != "" {
+				games[r.i].CoverURL = r.url
+			}
+		case <-deadline:
+			return // jobs restantes terminam depois mas nao tocam mais em games
+		}
 	}
 }

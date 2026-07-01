@@ -26,7 +26,7 @@ function sectionOf(cat) {
   return s ? s.key : null; // null = limpeza (vai pra pagina propria)
 }
 
-const state = { scan: null, rules: [], byId: {}, page: "inicio", cat: "todas", query: "", scoreInicial: null, startup: [], bench: null, benchBase: null, fps: null, fpsBase: null, fpsDur: 30, fpsPoll: null, fpsRefreshing: false, diag: null, driver: null, repairPoll: null, bloat: null, deep: null, thermal: null, clientLogo: null, admin: true, gpuPanel: null, customJogos: [], sub: { manutencao: "limpeza", medicao: "desempenho" } };
+const state = { scan: null, rules: [], byId: {}, page: "inicio", cat: "todas", query: "", scoreInicial: null, startup: [], bench: null, benchBase: null, fps: null, fpsBase: null, fpsDur: 30, fpsPoll: null, fpsRefreshing: false, diag: null, driver: null, repairPoll: null, bloat: null, deep: null, thermal: null, clientLogo: null, admin: true, gpuPanel: null, customJogos: [], updatePoll: null, sub: { manutencao: "limpeza", medicao: "desempenho" } };
 function escHtml(s) { return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 /* ---- API ----------------------------------------------------------------- */
@@ -50,7 +50,10 @@ function toast(kind, title, sub) {
     <button class="toast-close" aria-label="Fechar">${IC("err")}</button>`;
   el.querySelector(".toast-close").onclick = () => dismissToast(el);
   $("#toasts").appendChild(el);
-  const t1 = setTimeout(() => dismissToast(el), 3400);
+  // erros ficam mais tempo na tela (podem passar despercebidos se o técnico
+  // estiver explicando algo pro cliente); sucesso/info seguem rápidos
+  const dur = kind === "err" ? 9000 : kind === "warn" ? 6000 : 3400;
+  const t1 = setTimeout(() => dismissToast(el), dur);
   el._dismissTimer = t1;
 }
 function dismissToast(el) {
@@ -842,7 +845,8 @@ function renderPanelConfig(r, exe, idx) {
     return;
   }
   if (r.error) {
-    tab.innerHTML = `<div class="gcfg-error">${IC("warn")}<div>${escHtml(r.error)}</div></div>`;
+    tab.innerHTML = `<div class="gcfg-error">${IC("warn")}<div><b>${escHtml(r.error)}</b><br>
+      <small>Verifique se o jogo já foi aberto ao menos uma vez — o arquivo de config só existe depois do primeiro início.</small></div></div>`;
     return;
   }
   const vals = r.values || {};
@@ -1172,6 +1176,11 @@ async function doScan() {
     setScanBar(((i + 1) / SCAN_STEPS.length) * 0.94);
   }
 
+  // se a coleta real (scanP) ainda não terminou quando a cerimônia visual acaba,
+  // avisa em vez de deixar a barra parada em 94% parecendo travada (PC lento/disco
+  // cheio pode fazer a coleta real demorar mais que a animação decorativa).
+  const stillCollecting = await Promise.race([scanP.then(() => false), sleep(50).then(() => true)]);
+  if (stillCollecting) { $("#scanTitle").textContent = "Ainda coletando dados do sistema…"; setScanBar(0.97); }
   const scan = await scanP;
   // espera os extras (discos/inicialização/jogos), mas no máximo ~2.5s a mais
   // (não trava em PC com biblioteca de jogos enorme).
@@ -1220,17 +1229,17 @@ function showScoreResult(antes, depois, n) {
   const colAntes = scoreColor(antes), colDepois = scoreColor(depois);
   infoModal("Resultado da otimização", `
     <div class="score-result">
-      <div class="sr-col">
-        <span class="sr-lbl">Antes</span>
-        <b class="sr-num" style="color:${colAntes}">${antes}</b>
+      <div class="scr-col">
+        <span class="scr-lbl">Antes</span>
+        <b class="scr-num" style="color:${colAntes}">${antes}</b>
       </div>
-      <div class="sr-arrow">▲<span class="sr-diff">+${diff}</span></div>
-      <div class="sr-col">
-        <span class="sr-lbl">Depois</span>
-        <b class="sr-num" style="color:${colDepois}">${depois}</b>
+      <div class="scr-arrow">▲<span class="scr-diff">+${diff}</span></div>
+      <div class="scr-col">
+        <span class="scr-lbl">Depois</span>
+        <b class="scr-num" style="color:${colDepois}">${depois}</b>
       </div>
     </div>
-    <div class="sr-sub">${n} otimização${n > 1 ? "ões" : ""} aplicada${n > 1 ? "s" : ""} · score subiu ${diff} ${diff === 1 ? "ponto" : "pontos"}</div>
+    <div class="scr-sub">${n} otimização${n > 1 ? "ões" : ""} aplicada${n > 1 ? "s" : ""} · score subiu ${diff} ${diff === 1 ? "ponto" : "pontos"}</div>
   `);
 }
 let _adminWarned = false;
@@ -1243,6 +1252,24 @@ function adminWarn() {
     <p>A maioria das otimizações mexe em <b>configurações do sistema</b> (registro do Windows, serviços, plano de energia) — e isso <b>exige privilégio de administrador</b>. Sem ele, elas falham com "acesso negado" e não ligam.</p>
     <p><b>Como resolver:</b> feche o ThazzDraco, clique com o <b>botão direito</b> no ícone e escolha <b>"Executar como administrador"</b> (aceite o aviso do Windows).</p>
     <p style="color:var(--ink-3);font-size:12.5px">As otimizações que mexem só no seu usuário (Game Mode, transparência, etc.) funcionam sem admin — por isso <b>algumas aplicam e outras não</b>.</p>`);
+}
+
+// Diferencia "já estava aplicado" de "não se aplica a este hardware" pra não
+// deixar o técnico sem saber por que nada mudou. Roda depois de afterMutation()
+// já ter atualizado state.byId com o estado pós-apply de cada regra pulada.
+function nadaAplicarMotivo(puladas) {
+  if (!puladas || !puladas.length) return "Já estava aplicado ou não se aplica.";
+  let naoAplicavel = 0, jaAplicado = 0, outro = 0;
+  puladas.forEach((id) => {
+    const est = state.byId[id]?.estado;
+    if (est === "nao-aplicavel") naoAplicavel++;
+    else if (est === "aplicado") jaAplicado++;
+    else outro++;
+  });
+  if (naoAplicavel && !jaAplicado && !outro) return "Não se aplica ao seu hardware.";
+  if (jaAplicado && !naoAplicavel && !outro) return "Já estava tudo aplicado.";
+  if (naoAplicavel && jaAplicado) return "Parte já aplicada, parte não se aplica ao seu hardware.";
+  return "Já estava aplicado ou não se aplica.";
 }
 
 async function applyIds(ids, origem, msg) {
@@ -1258,7 +1285,7 @@ async function applyIds(ids, origem, msg) {
       const negado = erros.some((m) => /denied|negad|acesso/i.test(m || ""));
       if (rep.limpeza_mb) toast("ok", `Limpeza concluída`, `${fmtMB(rep.limpeza_mb)} liberados.`);
       else if (n) toast("ok", `${n} otimização${n > 1 ? "ões" : ""} aplicada${n > 1 ? "s" : ""}`, rep.restore_point ? "Ponto de restauração criado." : "");
-      else if (!erros.length) toast("info", "Nada a aplicar", "Já estava aplicado ou não se aplica.");
+      else if (!erros.length) toast("info", "Nada a aplicar", nadaAplicarMotivo(rep.puladas));
       if (negado) { adminWarn(); }   // a maioria das otimizações precisa de administrador
       else if (erros.length) toast("err", "Alguns itens falharam", erros[0]);
     } catch (e) { toast("err", "Falha ao aplicar", e.message); } finally { busy(false); }
@@ -1268,7 +1295,7 @@ async function applyIds(ids, origem, msg) {
 }
 function consentBody(rules) {
   const risky = rules.some((r) => r.tier === "vermelho"), clean = rules.some(isCleanup);
-  const items = rules.map((r) => `<li><b>${r.titulo}</b> — ${r.descricao}</li>`).join("");
+  const items = rules.map((r) => `<li><b>${escHtml(r.titulo)}</b> — ${escHtml(r.descricao)}</li>`).join("");
   return `<p>Confirma ${clean ? "a limpeza" : "estes ajustes"}?</p>
     <ul style="margin:12px 0 0 18px;display:flex;flex-direction:column;gap:8px">${items}</ul>
     ${risky ? `<div class="warn-box">${IC("warn")}<div>Tweaks avançados podem ter efeitos colaterais. Tudo reversível pelo Histórico.</div></div>` : ""}
@@ -1651,7 +1678,7 @@ async function runBench() {
     if (run) run.innerHTML = `<div class="bench-done">${IC("ok")}<div>Estresse concluído · ${r.threads} threads${gpuTxt}.</div></div>`;
     renderBench();
   } catch (e) {
-    if (run) run.innerHTML = `<div class="bench-done err">${IC("err")}<div>Falha ao rodar o benchmark.</div></div>`;
+    if (run) run.innerHTML = `<div class="bench-done err">${IC("err")}<div>Falha ao rodar o benchmark.<br><small>${escHtml(e.message || "")} — feche outros apps pesados e tente de novo.</small></div></div>`;
   } finally {
     if (pollGpu) clearInterval(pollGpu); // nunca deixa o poll de métricas órfão
     if (btn) btn.disabled = false;
@@ -1829,7 +1856,7 @@ async function runFps() {
     const r = await api("/api/fps/iniciar", { processo: proc, segundos: state.fpsDur });
     if (!r.ok) { if (run) run.innerHTML = `<div class="bench-done err">${IC("err")}<div>${escHtml(r.erro || "Falha ao iniciar.")}</div></div>`; if (btn) btn.disabled = false; return; }
     pollFps();
-  } catch (e) { if (run) run.innerHTML = `<div class="bench-done err">${IC("err")}<div>Falha ao iniciar a captura.</div></div>`; if (btn) btn.disabled = false; }
+  } catch (e) { if (run) run.innerHTML = `<div class="bench-done err">${IC("err")}<div>Falha ao iniciar a captura.<br><small>${escHtml(e.message || "")} — verifique se o jogo está aberto e tente de novo.</small></div></div>`; if (btn) btn.disabled = false; }
 }
 
 function pollFps() {
@@ -1935,7 +1962,7 @@ async function renderDriver() {
     <div class="drv-head">${IC("gpu")}<h3>Driver de GPU</h3>
       <button class="btnG drv-guide" id="btnDrvGuide"><span data-icon="guide"></span> Guia: instalar limpo</button>${guiaBtn}${resid}</div>
     ${rows}
-    <div class="drv-note">Mostramos a versão e a data reais — sem alarme de "desatualizado". Atualize só se quiser; o guia explica como fazer <b>sem quebrar a tela</b>.</div>
+    <div class="drv-note">Mostramos a versão e a data reais aqui, sem cobrar atualização. Atualize só se quiser; o guia explica como fazer <b>sem quebrar a tela</b>.</div>
   </div>`;
   const gb = $("#btnDrvGuide"); if (gb) gb.onclick = driverGuide;
   const gs = $("#btnGpuSettings"); if (gs) gs.onclick = () => gpuSettingsGuide(temNvidia, temAmd);
@@ -2106,7 +2133,7 @@ async function runThermal() {
     state.thermal = { temNVML, peakTemp, peakUso, thTermico, thPot };
     renderThermalVerdict(state.thermal);
   } catch (e) {
-    res.innerHTML = `<div class="bench-done err">${IC("err")}<div>Falha no teste térmico.</div></div>`;
+    res.innerHTML = `<div class="bench-done err">${IC("err")}<div>Falha no teste térmico.<br><small>${escHtml(e.message || "")} — feche outros apps pesados e tente de novo.</small></div></div>`;
   } finally {
     clearInterval(poll); // nunca deixa o poll de métricas órfão
     if (btn) btn.disabled = false;
@@ -2252,7 +2279,7 @@ async function renderTools() {
     { id: "dns", icon: "netcat", nome: "DNS Rápido", desc: "Troca o DNS para Cloudflare, Google ou Quad9 num clique — resolve lentidão em logins e matchmaking online.", btn: "Configurar DNS" },
     { id: "rede", icon: "netcat", nome: "Faxina de rede", desc: "Limpa o cache DNS e reseta TCP/IP + Winsock — resolve lentidão e erros de conexão.", btn: "Limpar rede" },
     { id: "trim", icon: "sys", nome: "TRIM nos SSDs", desc: "Roda o TRIM (manutenção correta de SSD). HDDs o Windows cuida sozinho.", btn: "Rodar TRIM" },
-    { id: "energia", icon: "bolt", nome: "Plano Desempenho Máximo", desc: "Desbloqueia e ativa o plano de energia oculto \"Ultimate Performance\" (ideal desktop na tomada).", btn: "Ativar" },
+    { id: "energia", icon: "bolt", nome: "Plano Desempenho Máximo", desc: "Desbloqueia e ativa o plano de energia oculto \"Ultimate Performance\" — ideal para desktop na tomada.", btn: "Ativar" },
     { id: "defender", icon: "shield", nome: "Varredura rápida (Defender)", desc: "PC lento às vezes é vírus/minerador. Dispara uma varredura rápida do Microsoft Defender.", btn: "Escanear" },
     { id: "hibernacao", icon: "broom", nome: hib.ligada ? "Liberar hibernação" : "Hibernação desligada",
       desc: hib.ligada ? `O hiberfil.sys ocupa ~${fmtCleanMB(hib.mb)}. Desligar libera esse espaço (e desativa a Inicialização Rápida).` : "A hibernação já está desligada (hiberfil.sys liberado).",
@@ -2284,7 +2311,7 @@ async function runTool(id, el) {
   };
   if (id === "turbo") {
     confirmModal({ title: "Ativar Modo Turbo?",
-      body: "<p>Executa 3 ações de uma vez: <b>Energia Máxima</b> (Ultimate Performance), <b>Limpeza de rede</b> (DNS + TCP/IP) e <b>TRIM nos SSDs</b>. Seguro e reversível.</p>",
+      body: "<p>Executa 3 ações de uma vez: <b>Energia Máxima</b> (Ultimate Performance), <b>Limpeza de rede</b> (DNS + TCP/IP) e <b>TRIM nos SSDs</b>. Seguro — energia e rede voltam pelo Histórico; TRIM é manutenção padrão de SSD e não tem desfazer.</p>",
       okLabel: "⚡ Ativar", onOk: async () => {
         busy(true, "Modo Turbo — aguarde…");
         try {
@@ -2944,7 +2971,7 @@ function renderTempChart() {
     ctx.fillStyle = "#2a4a6a"; ctx.font = "12px monospace"; ctx.textAlign = "center";
     ctx.fillText("Aguardando amostras de temperatura…", W / 2, H / 2); return;
   }
-  [{ key: "cpu", color: "#ff6030" }, { key: "gpu", color: "#b060ff" }].forEach(({ key, color }) => {
+  [{ key: "cpu", color: "#41c7ff" }, { key: "gpu", color: "#00c47a" }].forEach(({ key, color }) => {
     ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2;
     let first = true;
     tempHist.forEach((pt, i) => {
@@ -3087,23 +3114,41 @@ async function runDriverAudit() {
 
 /* ---- F1: Modo Game ao Vivo ------------------------------------------------- */
 let _liveGameTimer = null;
+let _liveGameFails = 0;
 
 function startLiveGamePoll() {
   if (_liveGameTimer) return;
+  _liveGameFails = 0;
   _liveGameTimer = setInterval(async () => {
     try {
       const st = await api("/api/modo-game/status");
+      _liveGameFails = 0;
       updateLiveGameBar(st.ativo, st.rodando || []);
-    } catch (e) {}
+    } catch (e) {
+      // 3 falhas seguidas (~9s) = avisa em vez de travar no último estado silenciosamente
+      _liveGameFails++;
+      if (_liveGameFails >= 3) showLiveGameOffline();
+    }
   }, 3000);
 }
 
 function stopLiveGamePoll() {
   if (_liveGameTimer) { clearInterval(_liveGameTimer); _liveGameTimer = null; }
+  _liveGameFails = 0;
+}
+
+function showLiveGameOffline() {
+  const dot = $("#lgbDot"), status = $("#lgbStatus"), running = $("#lgbRunning");
+  const hudDot = $("#lgbHudDot"); if (hudDot) hudDot.className = "lgb-hud-dot offline";
+  if (!dot) return;
+  dot.className = "lgb-dot offline";
+  status.textContent = "Sem conexão — tentando de novo…";
+  running.innerHTML = "";
 }
 
 function updateLiveGameBar(ativo, rodando) {
   const dot = $("#lgbDot"), status = $("#lgbStatus"), running = $("#lgbRunning"), toggle = $("#lgbToggle");
+  updateLiveGameHudBadge(ativo, rodando);
   if (!dot) return;
   if (ativo) {
     toggle?.classList.add("on");
@@ -3121,6 +3166,22 @@ function updateLiveGameBar(ativo, rodando) {
     dot.className = "lgb-dot";
     status.textContent = "Desativado";
     running.innerHTML = "";
+  }
+}
+
+// Indicador discreto no HUD do topo — visível em qualquer página, não só em Jogos,
+// pra deixar claro que o monitoramento continua rodando em segundo plano.
+function updateLiveGameHudBadge(ativo, rodando) {
+  const badge = $("#lgbHudBadge"); if (!badge) return;
+  badge.classList.toggle("hidden", !ativo);
+  if (!ativo) return;
+  const dot = $("#lgbHudDot"), txt = $("#lgbHudTxt");
+  if (rodando && rodando.length) {
+    dot.className = "lgb-hud-dot live";
+    txt.textContent = "Jogando agora";
+  } else {
+    dot.className = "lgb-hud-dot";
+    txt.textContent = "Modo Game ao Vivo";
   }
 }
 
@@ -3196,6 +3257,7 @@ function openUpdatePanel() {
 function closeUpdatePanel() {
   $("#updPanel")?.classList.remove("open");
   $("#updPanelBg")?.classList.remove("open");
+  if (state.updatePoll) { clearInterval(state.updatePoll); state.updatePoll = null; }
 }
 
 function renderUpdatePanel() {
@@ -3224,10 +3286,11 @@ function renderUpdatePanel() {
     <button class="btn-hero upd-dl-btn" id="updDlBtn">${IC("update")} Instalar ${escHtml(newV)}</button>
     <button class="upd-check-btn" onclick="forceCheckUpdate()">Verificar agora</button>`;
   const dlBtn = $("#updDlBtn");
-  if (dlBtn) dlBtn.onclick = () => startInstall(r);
+  if (dlBtn) dlBtn.onclick = () => { dlBtn.disabled = true; startInstall(r); };
 }
 
 async function startInstall(updateInfo) {
+  if (state.updatePoll) return; // ja tem um download/instalacao em andamento
   const body = $("#updBody"); if (!body) return;
   const newV = "v" + (updateInfo.version || "");
   const curV = _appVersion ? "v" + _appVersion : "—";
@@ -3250,7 +3313,7 @@ async function startInstall(updateInfo) {
     return;
   }
 
-  const poll = setInterval(async () => {
+  state.updatePoll = setInterval(async () => {
     try {
       const p = await api("/api/update/progress");
       const bar = $("#updDlBar"), txt = $("#updDlTxt");
@@ -3262,14 +3325,14 @@ async function startInstall(updateInfo) {
         if (txt) txt.textContent = `Baixando… ${mb} MB${tot} (${pct}%)`;
       }
       if (p.status === "ready") {
-        clearInterval(poll);
+        clearInterval(state.updatePoll); state.updatePoll = null;
         if (bar) bar.style.width = "100%";
         if (txt) txt.textContent = "Aplicando atualização…";
         await api("/api/update/apply", {});
         body.innerHTML = `<div class="upd-status ok">${IC("ok")}<div><b>Atualizado!</b><span>O app vai reiniciar em instantes…</span></div></div>`;
       }
       if (p.status === "error") {
-        clearInterval(poll);
+        clearInterval(state.updatePoll); state.updatePoll = null;
         body.innerHTML = `<div class="upd-status">${IC("err")}<div><b>Erro no download</b><span>${escHtml(p.error || "Tente novamente")}</span></div></div>
           <button class="upd-check-btn" onclick="renderUpdatePanel()">Voltar</button>`;
       }
@@ -3358,6 +3421,7 @@ async function boot() {
   renderPresets(); // perfis disponíveis mesmo antes de escanear
   renderCustomPresets(); // presets do usuário carregam em paralelo
   scheduleUpdateCheck(); // verifica atualização em background
+  initLiveGameBar(); // badge global no HUD: mostra se o Modo Game ao Vivo ja estava ativo, mesmo fora da aba Jogos
 }
 // Estado inicial (antes de escanear): convida a clicar, sem dados ainda.
 function setIdle() {

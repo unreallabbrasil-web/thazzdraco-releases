@@ -29,6 +29,9 @@
         <span id="hudStatus">Núcleo online · em espera</span>
         <span class="build-ver" id="buildVer" title="Clique para reconstruir o app">v—</span>
       </div>
+      <button class="lgb-hud-badge hidden" id="lgbHudBadge" title="Modo Game ao Vivo ativo — clique para abrir" onclick="showPage('jogos')">
+        <span class="lgb-hud-dot" id="lgbHudDot"></span><span id="lgbHudTxt">Modo Game ao Vivo</span>
+      </button>
     </div>
     <div class="hudright">
       <div class="telem">
@@ -318,8 +321,8 @@
             <div class="temp-stat"><span class="ts-lbl">CPU</span><b id="tcCpu">—</b></div>
             <div class="temp-stat"><span class="ts-lbl">GPU</span><b id="tcGpu">—</b></div>
             <div class="temp-legend">
-              <span class="temp-dot" style="background:#ff6030"></span>CPU
-              <span class="temp-dot" style="background:#b060ff"></span>GPU
+              <span class="temp-dot" style="background:#41c7ff"></span>CPU
+              <span class="temp-dot" style="background:#00c47a"></span>GPU
             </div>
           </div>
           <canvas id="tempChartCanvas" class="temp-chart-canvas"></canvas>

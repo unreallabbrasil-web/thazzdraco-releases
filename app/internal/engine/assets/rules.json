@@ -482,7 +482,7 @@
       "descricao": "Para o servico de telemetria da NVIDIA (NvTelemetryContainer). So aparece se voce tem GPU NVIDIA.",
       "tier": "verde", "modo": "acionavel", "impacto": "baixo",
       "requer_reboot": false, "requer_consentimento": false, "toca_dados_pessoais": false,
-      "hardware_gate": null,
+      "hardware_gate": { "campo": "hardware.gpu.vendor", "op": "==", "valor": "NVIDIA" },
       "detect": { "tipo": "service", "servicos": ["NvTelemetryContainer"] },
       "action": { "tipo": "service", "servicos": ["NvTelemetryContainer"], "startup": "Disabled" },
       "undo": { "tipo": "restore" }

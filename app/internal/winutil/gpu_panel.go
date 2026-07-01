@@ -84,11 +84,21 @@ func NvidiaPanel() map[string]any {
 }
 
 // NvidiaSetPower define o limite de potência da GPU (em watts) via nvidia-smi.
-// Requer privilégio de administrador.
+// Requer privilégio de administrador. Valida o valor contra o range real da
+// placa (via NvidiaPanel) antes de repassar pro driver — nvidia-smi rejeita
+// valores fora da faixa, mas com uma mensagem de erro pouco amigável.
 func NvidiaSetPower(watts int) map[string]any {
 	smi := findNvidiaSmi()
 	if smi == "" {
 		return map[string]any{"ok": false, "erro": "nvidia-smi não encontrado (driver NVIDIA não instalado?)"}
+	}
+	if watts <= 0 {
+		return map[string]any{"ok": false, "erro": "valor de watts inválido"}
+	}
+	if panel := NvidiaPanel(); panel["disponivel"] == true {
+		if max, ok := panel["power_max_w"].(int); ok && max > 0 && watts > max {
+			return map[string]any{"ok": false, "erro": "watts acima do máximo suportado pela placa (" + strconv.Itoa(max) + " W)"}
+		}
 	}
 	_, err := runCapture(smi, "-pl", strconv.Itoa(watts))
 	if err != nil {

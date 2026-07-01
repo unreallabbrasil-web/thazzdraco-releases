@@ -45,6 +45,8 @@ func (s *Server) handleGameConfigSet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"ok": false, "erro": "exe e values obrigatórios"})
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := winutil.WriteGameConfig(req.Exe, req.Values); err != nil {
 		writeJSON(w, 500, map[string]any{"ok": false, "erro": err.Error()})
 		return

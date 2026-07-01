@@ -100,19 +100,16 @@ func HostsAdd(ip, host, comment string) error {
 			return fmt.Errorf("entrada já existe: %s %s", ip, host)
 		}
 	}
-	f, err := os.OpenFile(hostsPath(), os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	entry := fmt.Sprintf("\r\n%s\t%s", ip, host)
+	entry := fmt.Sprintf("%s\t%s", ip, host)
 	if comment != "" {
 		entry += "\t# " + comment + " " + tzHostsTag
 	} else {
 		entry += "\t" + tzHostsTag
 	}
-	_, err = f.WriteString(entry)
-	return err
+	// Reusa a mesma normalizacao de hostsRewrite (le, normaliza \r\n->\n, reescreve
+	// tudo com \r\n uniforme) em vez de O_APPEND bruto — evita misturar \r\n novo
+	// com \n pre-existente se o arquivo tiver sido editado por outra ferramenta.
+	return hostsRewrite(func(line string) (string, bool) { return line, true }, entry)
 }
 
 // HostsRemove remove uma entrada pelo par ip+host.
@@ -154,9 +151,10 @@ func hostsLineMatches(line, ip, host string) bool {
 		strings.EqualFold(parts[1], host)
 }
 
-// hostsRewrite lê, transforma e reescreve o arquivo hosts.
-// Normaliza para \n antes de processar e escreve de volta com \r\n (padrão Windows).
-func hostsRewrite(transform func(string) (string, bool)) error {
+// hostsRewrite lê, transforma e reescreve o arquivo hosts. Normaliza para \n
+// antes de processar e escreve de volta com \r\n (padrão Windows). appendLines,
+// se fornecido, é acrescentado ao final (usado por HostsAdd, já normalizado).
+func hostsRewrite(transform func(string) (string, bool), appendLines ...string) error {
 	p := hostsPath()
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -171,6 +169,7 @@ func hostsRewrite(transform func(string) (string, bool)) error {
 			out = append(out, nl)
 		}
 	}
+	out = append(out, appendLines...)
 	return os.WriteFile(p, []byte(strings.Join(out, "\r\n")), 0644)
 }
 
