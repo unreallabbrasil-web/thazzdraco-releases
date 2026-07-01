@@ -256,13 +256,26 @@
         </div>
         <div id="svcList"></div>
 
-        <!-- F12: Detecção de Drivers Desatualizados -->
-        <div class="ptitle" style="margin-top:28px">Auditoria de Drivers</div>
-        <div class="repair-intro">GPU, Áudio, Rede e Chipset — detecta drivers antigos que podem causar instabilidade.
-          <span class="bench-note">Sem internet; baseado na data de instalação local.</span>
+        <!-- F12: Atualização de Drivers -->
+        <div class="ptitle" style="margin-top:28px">Atualização de Drivers</div>
+        <div class="repair-intro">Busca de verdade via <b>Windows Update</b> — a mesma engine do Windows, cobre GPU, rede, áudio, chipset e mais. Mostra o driver real disponível, com tamanho, e instala com 1 clique.
+          <span class="bench-note">Exige administrador pra instalar. Pode levar até 1 min pra buscar.</span>
         </div>
         <div class="svc-bar">
-          <button class="btnG" id="btnDriverAudit">Verificar drivers</button>
+          <button class="btnG" id="btnDriverWuaSearch"><span data-icon="search"></span> Buscar atualizações</button>
+          <span id="drvWuaSummary" class="bench-note"></span>
+        </div>
+        <div id="drvWuaBox"></div>
+        <div class="repair-actions" id="drvWuaActions" style="display:none">
+          <button class="btn-hero" id="btnDriverWuaInstall"><span data-icon="update"></span> Instalar selecionados</button>
+        </div>
+
+        <div class="ptitle" style="margin-top:24px">Visão geral por idade</div>
+        <div class="repair-intro">GPU, Áudio, Rede e Chipset — lista todos os drivers instalados e a idade de cada um.
+          <span class="bench-note">Não verifica versão nova — só a data local. Use "Buscar atualizações" acima pra saber de verdade.</span>
+        </div>
+        <div class="svc-bar">
+          <button class="btnG" id="btnDriverAudit">Ver por idade</button>
           <span id="drvSummary" class="bench-note"></span>
         </div>
         <div id="drvList"></div>

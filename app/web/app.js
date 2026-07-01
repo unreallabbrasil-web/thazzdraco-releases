@@ -1429,9 +1429,15 @@ function wire() {
   const btnSvc = $("#btnSvcScan");
   if (btnSvc) btnSvc.onclick = runServiceScan;
 
-  // F12: Auditoria de Drivers
+  // F12: Auditoria de Drivers (visão por idade)
   const btnDrv = $("#btnDriverAudit");
   if (btnDrv) btnDrv.onclick = runDriverAudit;
+
+  // F12: Atualização de Drivers via Windows Update (busca real)
+  const btnWuaSearch = $("#btnDriverWuaSearch");
+  if (btnWuaSearch) btnWuaSearch.onclick = runDriverWuaSearch;
+  const btnWuaInstall = $("#btnDriverWuaInstall");
+  if (btnWuaInstall) btnWuaInstall.onclick = runDriverWuaInstall;
 
   // F1: Modo Game ao Vivo — toggle
   const lgbToggle = $("#lgbToggle");
@@ -1954,12 +1960,14 @@ async function renderDriver() {
   state.driver = d;
   const gpus = d.gpus || [];
   if (!gpus.length) { box.innerHTML = ""; return; }
-  const rows = gpus.map((g) => {
+  const rows = gpus.map((g, i) => {
     const idade = g.idade_meses >= 0 ? (g.idade_meses < 1 ? "menos de 1 mês" : `~${g.idade_meses} ${g.idade_meses === 1 ? "mês" : "meses"}`) : "data N/D";
     const tag = g.dedicada ? `<span class="drv-tag">principal</span>` : `<span class="drv-tag sec">integrada</span>`;
+    const nvBtn = g.vendor === "NVIDIA" ? `<button class="drv-nvlink" data-nvlink="${i}">Ver driver mais recente na NVIDIA →</button>` : "";
     return `<div class="drv-row">
       <div class="drv-gpu">${escHtml(g.nome)} ${tag}</div>
-      <div class="drv-meta"><span>Driver <b>${escHtml(g.versao || "?")}</b></span><span>${g.data || "—"}</span><span>${idade}</span></div></div>`;
+      <div class="drv-meta"><span>Driver <b>${escHtml(g.versao || "?")}</b></span><span>${g.data || "—"}</span><span>${idade}</span></div>
+      ${nvBtn}</div>`;
   }).join("");
   const resid = d.residuos
     ? `<button class="btnG drv-clean" data-drvclean="${escHtml(d.residuos.pasta)}"><span data-icon="broom"></span> Limpar resíduos (${d.residuos.mb} MB)</button>`
@@ -1971,10 +1979,22 @@ async function renderDriver() {
     <div class="drv-head">${IC("gpu")}<h3>Driver de GPU</h3>
       <button class="btnG drv-guide" id="btnDrvGuide"><span data-icon="guide"></span> Guia: instalar limpo</button>${guiaBtn}${resid}</div>
     ${rows}
-    <div class="drv-note">Mostramos a versão e a data reais aqui, sem cobrar atualização. Atualize só se quiser; o guia explica como fazer <b>sem quebrar a tela</b>.</div>
+    <div class="drv-note">Mostramos a versão e a data reais aqui, sem cobrar atualização. Pra buscar atualização de verdade (qualquer driver, não só GPU), use a <b>Auditoria de Drivers</b> em Manutenção → Ferramentas.</div>
   </div>`;
   const gb = $("#btnDrvGuide"); if (gb) gb.onclick = driverGuide;
   const gs = $("#btnGpuSettings"); if (gs) gs.onclick = () => gpuSettingsGuide(temNvidia, temAmd);
+  $$("#diagDriver [data-nvlink]").forEach((btn) => {
+    btn.onclick = async () => {
+      const g = gpus[+btn.dataset.nvlink]; if (!g) return;
+      btn.disabled = true; const orig = btn.textContent; btn.textContent = "Procurando…";
+      try {
+        const r = await api("/api/drivers/nvidia-link?nome=" + encodeURIComponent(g.nome));
+        if (r.ok) window.open(r.url, "_blank");
+        else toast("warn", "Não achei essa placa no catálogo da NVIDIA", r.erro || "");
+      } catch (e) { toast("err", "Falha", e.message); }
+      finally { btn.disabled = false; btn.textContent = orig; }
+    };
+  });
 }
 
 // Guia dos ajustes de painel NVIDIA/AMD (do Manual Mestre §12/§13). Honesto:
@@ -3128,9 +3148,99 @@ async function runDriverAudit() {
         <span class="drv-badge" style="color:${st.col}">${st.lbl}</span>
       </div>`;
     }).join("");
-    if (antigos.length) toast("warn", `${antigos.length} driver(s) antigo(s)`, "Atualize pelo Windows Update ou site do fabricante.");
+    if (antigos.length) toast("warn", `${antigos.length} driver(s) antigo(s)`, "Use \"Buscar atualizações\" acima pra ver o que tem de verdade.");
   } catch (e) { box.innerHTML = `<div class="empty">${IC("err")}<div>Falha: ${escHtml(e.message)}</div></div>`; }
   finally { if (btn) btn.disabled = false; }
+}
+
+/* ---- Atualização real de drivers (Windows Update Agent) ------------------- */
+let _drvWuaPoll = null;
+let _drvWuaFound = [];
+
+async function runDriverWuaSearch() {
+  const btn = $("#btnDriverWuaSearch"), box = $("#drvWuaBox"), sum = $("#drvWuaSummary"), actions = $("#drvWuaActions");
+  if (!box || _drvWuaPoll) return;
+  btn.disabled = true;
+  actions.style.display = "none";
+  sum.textContent = "";
+  box.innerHTML = `<div class="empty">${IC("ring")}<div>Buscando no Windows Update… pode levar até 1 min.</div></div>`;
+  try {
+    const r = await api("/api/drivers/wua/buscar", {});
+    if (!r.ok) { box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(r.erro || "Falha ao iniciar busca.")}</div></div>`; btn.disabled = false; return; }
+  } catch (e) {
+    box.innerHTML = `<div class="empty">${IC("err")}<div>Falha: ${escHtml(e.message)}</div></div>`; btn.disabled = false; return;
+  }
+  _drvWuaPoll = setInterval(async () => {
+    try {
+      const st = await api("/api/drivers/wua/status");
+      if (st.estado === "pronto") {
+        clearInterval(_drvWuaPoll); _drvWuaPoll = null; btn.disabled = false;
+        _drvWuaFound = st.updates || [];
+        renderDriverWuaResults(_drvWuaFound);
+      } else if (st.estado === "erro") {
+        clearInterval(_drvWuaPoll); _drvWuaPoll = null; btn.disabled = false;
+        box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(st.erro || "Falha na busca.")}</div></div>`;
+      }
+    } catch (e) { /* poll falhou momentaneamente — tenta de novo no próximo tick */ }
+  }, 2000);
+}
+
+function renderDriverWuaResults(updates) {
+  const box = $("#drvWuaBox"), sum = $("#drvWuaSummary"), actions = $("#drvWuaActions");
+  if (!updates.length) {
+    box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhuma atualização de driver pendente — tudo em dia pelo Windows Update.</div></div>`;
+    sum.textContent = "Tudo em dia";
+    actions.style.display = "none";
+    return;
+  }
+  sum.textContent = `${updates.length} driver${updates.length === 1 ? "" : "es"} disponível${updates.length === 1 ? "" : "eis"}`;
+  box.innerHTML = updates.map((u, i) => `
+    <label class="sel-row">
+      <input type="checkbox" data-wua="${i}" data-mb="${u.tamanho_mb || 0}" checked>
+      <div class="sel-body"><div class="sel-top"><b>${escHtml(u.titulo)}</b>${u.tamanho_mb ? `<span class="sel-mb">${fmtCleanMB(u.tamanho_mb)}</span>` : ""}</div>
+        ${u.descricao ? `<span class="sel-desc">${escHtml(u.descricao)}</span>` : ""}</div>
+    </label>`).join("");
+  actions.style.display = "";
+  box.onchange = () => updateSelCount("#drvWuaBox", "#btnDriverWuaInstall", "Instalar");
+  updateSelCount("#drvWuaBox", "#btnDriverWuaInstall", "Instalar");
+}
+
+function runDriverWuaInstall() {
+  const sel = $$("#drvWuaBox input:checked").map((c) => _drvWuaFound[+c.dataset.wua]).filter(Boolean);
+  if (!sel.length) return toast("warn", "Nada selecionado", "Marque ao menos um driver.");
+  confirmModal({
+    title: `Instalar ${sel.length} driver${sel.length === 1 ? "" : "es"}?`,
+    body: `<p>Baixa e instala pelo Windows Update — o mecanismo oficial. <b>A tela pode piscar por alguns segundos</b> durante a troca (normal em driver de GPU/rede). Evite fazer isso no meio de uma sessão remota crítica.</p>`,
+    okLabel: "Instalar",
+    onOk: async () => {
+      const box = $("#drvWuaBox");
+      box.innerHTML = `<div class="empty">${IC("ring")}<div>Baixando e instalando…</div></div>`;
+      $("#drvWuaActions").style.display = "none";
+      try {
+        const r = await api("/api/drivers/wua/instalar", { ids: sel.map((u) => u.id) });
+        if (!r.ok) { box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(r.erro || "Falha ao iniciar instalação.")}</div></div>`; return; }
+      } catch (e) { box.innerHTML = `<div class="empty">${IC("err")}<div>Falha: ${escHtml(e.message)}</div></div>`; return; }
+      pollDriverWuaInstall();
+    }
+  });
+}
+
+function pollDriverWuaInstall() {
+  const box = $("#drvWuaBox");
+  const poll = setInterval(async () => {
+    try {
+      const st = await api("/api/drivers/wua/status");
+      if (st.estado === "concluido") {
+        clearInterval(poll);
+        box.innerHTML = `<div class="empty">${IC("ok")}<div>Driver(s) instalado(s)!${st.reboot_necessario ? " Reinicie o PC pra concluir." : ""}</div></div>`;
+        toast("ok", "Driver instalado", st.reboot_necessario ? "Reinicie para concluir." : "");
+        renderDriver();
+      } else if (st.estado === "erro") {
+        clearInterval(poll);
+        box.innerHTML = `<div class="empty">${IC("err")}<div>${escHtml(st.erro || "Falha na instalação.")}</div></div>`;
+      }
+    } catch (e) {}
+  }, 2000);
 }
 
 /* ---- F1: Modo Game ao Vivo ------------------------------------------------- */

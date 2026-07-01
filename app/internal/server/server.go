@@ -112,6 +112,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/servicos", s.handleServicos)
 	mux.HandleFunc("/api/servicos/parar", s.handleServicoParar)
 	mux.HandleFunc("/api/drivers/verificar", s.handleDriversVerificar)
+	mux.HandleFunc("/api/drivers/wua/buscar", s.handleDriverUpdSearch)
+	mux.HandleFunc("/api/drivers/wua/status", s.handleDriverUpdStatus)
+	mux.HandleFunc("/api/drivers/wua/instalar", s.handleDriverUpdInstall)
+	mux.HandleFunc("/api/drivers/nvidia-link", s.handleNvidiaDriverLink)
 	mux.HandleFunc("/api/ferramentas/dns", s.handleToolDNS)
 	mux.HandleFunc("/api/ferramentas/dns/providers", s.handleDNSProviders)
 	mux.HandleFunc("/api/gpu/painel", s.handleGPUPanel)
@@ -757,6 +761,54 @@ func (s *Server) handleServicoParar(w http.ResponseWriter, r *http.Request) {
 // F12: audita drivers instalados e detecta os mais antigos.
 func (s *Server) handleDriversVerificar(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, winutil.DriversAudit())
+}
+
+// handleDriverUpdSearch inicia a busca de drivers pendentes via Windows Update.
+func (s *Server) handleDriverUpdSearch(w http.ResponseWriter, _ *http.Request) {
+	err := winutil.DriverUpdMgr().StartSearch()
+	resp := map[string]any{"ok": err == nil}
+	if err != nil {
+		resp["erro"] = err.Error()
+	}
+	writeJSON(w, 200, resp)
+}
+
+// handleDriverUpdStatus devolve o andamento da busca/instalação (poll).
+func (s *Server) handleDriverUpdStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, winutil.DriverUpdMgr().Status())
+}
+
+type driverUpdInstallReq struct {
+	IDs []string `json:"ids"`
+}
+
+// handleDriverUpdInstall baixa e instala os drivers selecionados via Windows Update.
+func (s *Server) handleDriverUpdInstall(w http.ResponseWriter, r *http.Request) {
+	var req driverUpdInstallReq
+	json.NewDecoder(r.Body).Decode(&req)
+	err := winutil.DriverUpdMgr().StartInstall(req.IDs)
+	resp := map[string]any{"ok": err == nil}
+	if err != nil {
+		resp["erro"] = err.Error()
+	}
+	writeJSON(w, 200, resp)
+}
+
+// handleNvidiaDriverLink monta o link direto pra página de driver da NVIDIA
+// da placa exata do usuário (a API de checagem automática deles está fora do
+// ar — isso é o melhor substituto honesto: link certo, sem adivinhar versão).
+func (s *Server) handleNvidiaDriverLink(w http.ResponseWriter, r *http.Request) {
+	nome := r.URL.Query().Get("nome")
+	if nome == "" {
+		writeJSON(w, 400, map[string]any{"ok": false, "erro": "nome obrigatório"})
+		return
+	}
+	u, err := winutil.NvidiaDriverPageURL(nome)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "erro": err.Error()})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "url": u})
 }
 
 // F2: Modo Turbo — energia max + rede limpa + TRIM em uma chamada.
