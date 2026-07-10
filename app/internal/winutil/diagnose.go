@@ -104,10 +104,11 @@ func checkRefresh() *Gargalo {
 		return nil
 	}
 	if atual < max-1 {
+		perda := (max - atual) * 100 / max // proporcional real, não "quase metade" fixo
 		return &Gargalo{
 			ID: "display.refresh", Titulo: "Tela abaixo da taxa máxima", Severidade: "critico",
 			Detectado: fmt.Sprintf("Monitor a %d Hz, mas suporta %d Hz", atual, max),
-			Impacto:   fmt.Sprintf("Você está jogando a %d Hz num painel de %d Hz — joga fora quase metade da fluidez que o monitor entrega.", atual, max),
+			Impacto:   fmt.Sprintf("Você está jogando a %d Hz num painel de %d Hz — perde cerca de %d%% da fluidez que o monitor entrega.", atual, max, perda),
 			Correcao:  fmt.Sprintf("Configurações → Sistema → Vídeo → Vídeo avançado → Taxa de atualização → %d Hz.", max),
 			Acao:      "manual",
 		}

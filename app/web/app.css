@@ -371,7 +371,6 @@ body.perf .pt{display:none}body.perf .bolt{opacity:0}body.perf .energy-pulse.on{
 .cmd .cn .ic{width:50px;height:50px}
 
 /* ===== Inicialização ===== */
-.page-lead{color:var(--ink-2);font-size:13px;line-height:1.55;max-width:84ch;margin:-6px 4px 18px}
 .page-lead b{color:var(--ink)}
 .startup-head{display:flex;gap:10px;margin-bottom:14px}
 .startup-head .pill2{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);padding:7px 13px;border:1px solid var(--line);background:#0a131ecc}
