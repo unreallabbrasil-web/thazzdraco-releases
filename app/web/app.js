@@ -465,7 +465,15 @@ function showSub(page, sub) {
     else if (sub === "reparo" && !state.repairPoll) api("/api/reparo/status").then((st) => { if (st.estado === "rodando" || st.log?.length) pollRepair(); }).catch(() => {});
   } else if (page === "medicao") {
     if (sub === "desempenho") { startMetrics(); renderHealth(); }
-    else if (sub === "fps") { renderFpsGames(); renderFps(); }
+    else if (sub === "fps") {
+      renderFpsGames(); renderFps();
+      // Retoma uma captura em andamento (ou colhe o resultado) se o usuário saiu e
+      // voltou — senão o botão ficava travado e o resultado nunca aparecia.
+      if (!state.fpsPoll) api("/api/fps/status").then((st) => {
+        if (st.estado === "capturando") { const b = $("#btnFps"); if (b) b.disabled = true; pollFps(); }
+        else if (st.estado === "pronto" && st.resultado && !state.fps) pollFps();
+      }).catch(() => {});
+    }
     else if (sub === "benchmark") renderBench();
   }
 }
@@ -476,6 +484,10 @@ function stopLiveJobs(dest) {
   if (dest !== LIVE.METRICAS) stopMetrics();
   if (dest !== LIVE.FPS && state.fpsPoll) { clearInterval(state.fpsPoll); state.fpsPoll = null; }
   if (dest !== LIVE.REPARO && state.repairPoll) { clearInterval(state.repairPoll); state.repairPoll = null; }
+  // Polls de driver (auditoria/instalação WUA): param ao sair da aba para não
+  // ficarem órfãos consultando o status global indefinidamente.
+  if (state.drvAuditPoll) { clearInterval(state.drvAuditPoll); state.drvAuditPoll = null; const b = $("#btnDriverAudit"); if (b) b.disabled = false; }
+  if (state.drvInstallPoll) { clearInterval(state.drvInstallPoll); state.drvInstallPoll = null; }
   if (dest !== "jogos") stopLiveGamePoll(); // F1: para o poll de Game ao Vivo ao sair da aba
 }
 
@@ -1870,8 +1882,19 @@ async function runFps() {
 
 function pollFps() {
   const run = $("#fpsRun");
+  let fails = 0;
   const tick = async () => {
-    let st; try { st = await api("/api/fps/status"); } catch (e) { return; }
+    let st;
+    try { st = await api("/api/fps/status"); fails = 0; }
+    catch (e) {
+      // 3 falhas seguidas (~1,5s) = o núcleo caiu; destrava em vez de girar pra sempre.
+      if (++fails >= 3) {
+        clearInterval(state.fpsPoll); state.fpsPoll = null;
+        const btn = $("#btnFps"); if (btn) btn.disabled = false;
+        if (run) run.innerHTML = `<div class="bench-done err">${IC("err")}<div>Perdi contato com o núcleo durante a captura. Tente de novo.</div></div>`;
+      }
+      return;
+    }
     if (st.estado === "capturando") {
       if (st.processando) run.innerHTML = `<div class="bench-running">${IC("ring")}<div>Processando os quadros…</div></div>`;
       else {
@@ -2864,9 +2887,11 @@ async function renderCustomPresets() {
           onOk: async () => {
             busy(true, "Aplicando preset…");
             try {
-              const r = await api("/api/presets/custom/aplicar", { id: btn.dataset.cpApply });
+              // confirmar:true = o clique no "Aplicar" deste modal é o consentimento
+              // (o backend agora respeita isso; sem ele, regras de risco eram puladas).
+              const r = await api("/api/presets/custom/aplicar", { id: btn.dataset.cpApply, confirmar: true });
               if (r.relatorio) {
-                const n = r.relatorio.aplicados || 0;
+                const n = (r.relatorio.aplicadas || []).length;
                 toast("ok", "Preset aplicado", `${n} ${pluralWord(n, "regra ativada", "regras ativadas")}.`);
                 if (r.scan) { ingest(r.scan); }
               } else toast("err", "Falha", r.erro || "");
@@ -3125,6 +3150,7 @@ const DRV_ST = { ok: { col: "var(--green)", lbl: "OK" }, antigo: { col: "var(--a
 async function runDriverAudit() {
   const btn = $("#btnDriverAudit"), box = $("#drvList"), sum = $("#drvSummary");
   if (!box) return;
+  if (state.drvAuditPoll) return; // já tem uma checagem rodando — evita disparo duplo
   if (btn) btn.disabled = true;
   box.innerHTML = `<div class="empty">${IC("ring")}<div>Lendo drivers instalados…</div></div>`;
   let drivers;
@@ -3135,31 +3161,39 @@ async function runDriverAudit() {
     if (btn) btn.disabled = false;
     return;
   }
-  if (btn) btn.disabled = false;
-  if (!drivers.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum driver encontrado.</div></div>`; if (sum) sum.textContent = ""; return; }
+  if (!drivers.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum driver encontrado.</div></div>`; if (sum) sum.textContent = ""; if (btn) btn.disabled = false; return; }
 
   renderDriverAuditRows(drivers, null); // null = ainda não checou atualização real
   if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · verificando atualizações reais…`;
 
   // Dispara a checagem real (Windows Update) em paralelo, sem travar a lista que já apareceu.
+  // O botão só é reabilitado quando a checagem WUA termina (ver pollDriverAuditWua).
   try {
     const r = await api("/api/drivers/wua/buscar", {});
     if (!r.ok) throw new Error(r.erro || "falha ao iniciar checagem");
     pollDriverAuditWua(drivers);
   } catch (e) {
     if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · não consegui checar atualizações agora (${e.message}).`;
+    if (btn) btn.disabled = false;
   }
 }
 
 function pollDriverAuditWua(drivers) {
-  const poll = setInterval(async () => {
+  let ticks = 0;
+  const finish = () => {
+    clearInterval(state.drvAuditPoll); state.drvAuditPoll = null;
+    const btn = $("#btnDriverAudit"); if (btn) btn.disabled = false;
+  };
+  state.drvAuditPoll = setInterval(async () => {
+    // Teto de ~4min (o backend tem watchdog de 8min; isto destrava a UI antes).
+    if (++ticks > 120) { finish(); const sum = $("#drvSummary"); if (sum) sum.textContent = `${drivers.length} driver(s) · a checagem demorou demais e foi interrompida.`; return; }
     try {
       const st = await api("/api/drivers/wua/status");
       if (st.estado === "pronto") {
-        clearInterval(poll);
+        finish();
         renderDriverAuditRows(drivers, st.updates || []);
       } else if (st.estado === "erro") {
-        clearInterval(poll);
+        finish();
         const sum = $("#drvSummary");
         if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · falha ao checar atualizações (${st.erro || ""}).`;
       }
@@ -3231,6 +3265,7 @@ function installSingleDriverUpdate(btn) {
     body: `<p>Baixa e instala pelo Windows Update — o mecanismo oficial. <b>A tela pode piscar por alguns segundos</b> durante a troca (normal em driver de GPU/rede). Evite fazer isso no meio de uma sessão remota crítica.</p>`,
     okLabel: "Instalar",
     onOk: async () => {
+      if (state.drvInstallPoll) { toast("warn", "Aguarde", "Já há uma instalação de driver em andamento."); return; }
       btn.disabled = true; btn.textContent = "Instalando…";
       try {
         const r = await api("/api/drivers/wua/instalar", { ids: [id] });
@@ -3242,15 +3277,18 @@ function installSingleDriverUpdate(btn) {
 }
 
 function pollSingleDriverInstall(btn, nome) {
-  const poll = setInterval(async () => {
+  let ticks = 0;
+  const stop = () => { clearInterval(state.drvInstallPoll); state.drvInstallPoll = null; };
+  state.drvInstallPoll = setInterval(async () => {
+    if (++ticks > 600) { stop(); btn.disabled = false; btn.textContent = "Tentar de novo"; toast("warn", "Instalação demorou demais", nome); return; }
     try {
       const st = await api("/api/drivers/wua/status");
       if (st.estado === "concluido") {
-        clearInterval(poll);
+        stop();
         btn.outerHTML = `<span class="drv-badge" style="color:var(--green)">Instalado${st.reboot_necessario ? " · reinicie" : ""}</span>`;
         toast("ok", "Driver instalado", nome + (st.reboot_necessario ? " — reinicie pra concluir." : ""));
       } else if (st.estado === "erro") {
-        clearInterval(poll);
+        stop();
         btn.disabled = false; btn.textContent = "Tentar de novo";
         toast("err", "Falha na instalação", st.erro || "");
       }
@@ -3411,7 +3449,10 @@ function openUpdatePanel() {
 function closeUpdatePanel() {
   $("#updPanel")?.classList.remove("open");
   $("#updPanelBg")?.classList.remove("open");
-  if (state.updatePoll) { clearInterval(state.updatePoll); state.updatePoll = null; }
+  // NÃO cancela o poll de update: se um download/instalação está em curso, ele
+  // precisa continuar para disparar /api/update/apply quando ficar pronto. Fechar
+  // o painel antes matava o apply silenciosamente. O poll se encerra sozinho ao
+  // concluir (os updates de DOM já são guardados por `if (bar)`/`if (txt)`).
 }
 
 function renderUpdatePanel() {
