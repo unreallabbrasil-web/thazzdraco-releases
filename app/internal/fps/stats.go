@@ -65,7 +65,12 @@ func computeStats(proc string, raw []float64, dropped int) FrameStats {
 	// que os reviewers/gamers usam (mais representativa do engasgo do que um
 	// quadro isolado). Quadros mais lentos ficam no fim do slice ordenado.
 	st.Low1 = round1(1000 / worstMean(sorted, 0.01))
-	st.Low01 = round1(1000 / worstMean(sorted, 0.001))
+	// 0.1% low só tem lastro estatístico com muitos quadros: abaixo de ~2000 ele é
+	// a média de 1–2 quadros (= FPSMin, com variância enorme entre execuções). Zera
+	// nesse caso — a UI oculta em vez de vender ruído como medição precisa.
+	if len(sorted) >= 2000 {
+		st.Low01 = round1(1000 / worstMean(sorted, 0.001))
+	}
 
 	// Engasgo: quadros acima de 2x a mediana do frametime.
 	med := percentile(sorted, 0.50)

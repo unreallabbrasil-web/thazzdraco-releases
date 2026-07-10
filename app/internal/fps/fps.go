@@ -73,8 +73,19 @@ func ensurePresentMon() (string, error) {
 	}
 	p := filepath.Join(dir, "PresentMon.exe")
 	if st, err := os.Stat(p); err != nil || st.Size() != int64(len(bin)) {
-		if err := os.WriteFile(p, bin, 0o755); err != nil {
+		// Extração atômica (tmp por-PID + rename): duas instâncias extraindo ao
+		// mesmo tempo não colidem, e nunca fica um exe meio-escrito.
+		tmp := fmt.Sprintf("%s.%d.tmp", p, os.Getpid())
+		if err := os.WriteFile(tmp, bin, 0o755); err != nil {
 			return "", err
+		}
+		if err := os.Rename(tmp, p); err != nil {
+			os.Remove(tmp)
+			// se outra instância (ou uma captura em curso) já pôs o exe certo no
+			// lugar, seguimos com ele; senão, propaga o erro.
+			if st, e2 := os.Stat(p); e2 != nil || st.Size() != int64(len(bin)) {
+				return "", err
+			}
 		}
 		// licenca MIT do PresentMon junto ao binario (conformidade Intel/MIT)
 		os.WriteFile(filepath.Join(dir, "PresentMon-LICENSE.txt"), presentMonLicense, 0o644)
@@ -145,7 +156,9 @@ func (m *Manager) run(proc string, seconds int) {
 		m.fail("nao consegui preparar o PresentMon: " + err.Error())
 		return
 	}
-	csvPath := filepath.Join(os.TempDir(), "thazzdraco_fps.csv")
+	// CSV único por PID: duas instâncias do app medindo ao mesmo tempo não escrevem
+	// mais no mesmo arquivo (nem o defer os.Remove de uma apaga o da outra).
+	csvPath := filepath.Join(os.TempDir(), fmt.Sprintf("thazzdraco_fps_%d.csv", os.Getpid()))
 	os.Remove(csvPath)
 	defer os.Remove(csvPath)
 
@@ -166,7 +179,7 @@ func (m *Manager) run(proc string, seconds int) {
 		"-session_name", sessionName,
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
-	out, _ := cmd.CombinedOutput()
+	out, runErr := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		m.fail("o medidor de FPS demorou demais e foi interrompido. Tente de novo com o jogo aberto.")
 		return
@@ -180,6 +193,12 @@ func (m *Manager) run(proc string, seconds int) {
 			return
 		}
 		msg := perr.Error()
+		// Surface o erro do processo (ex.: exe em quarentena pelo AV = "%1 is not a
+		// valid Win32 application" / "Access is denied") — antes era engolido e o
+		// usuário só via "não gerou dados".
+		if runErr != nil {
+			msg += " · " + runErr.Error()
+		}
 		if s := strings.TrimSpace(string(out)); s != "" {
 			msg += " · " + lastLine(s)
 		}
