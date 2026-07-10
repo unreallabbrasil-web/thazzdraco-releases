@@ -57,7 +57,10 @@ func (m *driverUpdMgr) StartSearch() error {
 	m.updates = nil
 	m.errMsg = ""
 	m.started = time.Now()
+	myStart := m.started
 	m.mu.Unlock()
+
+	go m.watchdog(myStart, 8*time.Minute)
 
 	go func() {
 		runtime.LockOSThread()
@@ -68,6 +71,9 @@ func (m *driverUpdMgr) StartSearch() error {
 		updates, err := wuaSearchDriverUpdates()
 		m.mu.Lock()
 		defer m.mu.Unlock()
+		if !m.started.Equal(myStart) {
+			return // outra operação assumiu (ou o watchdog liberou); não sobrescreve
+		}
 		if err != nil {
 			m.state = "erro"
 			m.errMsg = err.Error()
@@ -77,6 +83,19 @@ func (m *driverUpdMgr) StartSearch() error {
 		m.state = "pronto"
 	}()
 	return nil
+}
+
+// watchdog libera o estado se a operação COM da WUA travar (wuauserv preso é o
+// cenário clássico em PC de cliente). As chamadas COM são síncronas e não dão
+// para cancelar, mas isto ao menos destrava a UI depois do tempo limite.
+func (m *driverUpdMgr) watchdog(myStart time.Time, d time.Duration) {
+	time.Sleep(d)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.started.Equal(myStart) && (m.state == "buscando" || m.state == "baixando" || m.state == "instalando") {
+		m.state = "erro"
+		m.errMsg = "a operação de driver excedeu o tempo limite (o Windows Update pode estar travado — reinicie o serviço wuauserv e tente de novo)"
+	}
 }
 
 // StartInstall baixa e instala os updates selecionados (por ID) em background.
@@ -93,7 +112,10 @@ func (m *driverUpdMgr) StartInstall(ids []string) error {
 	m.errMsg = ""
 	m.rebootNeeded = false
 	m.started = time.Now()
+	myStart := m.started
 	m.mu.Unlock()
+
+	go m.watchdog(myStart, 20*time.Minute)
 
 	go func() {
 		runtime.LockOSThread()
@@ -102,11 +124,16 @@ func (m *driverUpdMgr) StartInstall(ids []string) error {
 			defer ole.CoUninitialize()
 		}
 		m.mu.Lock()
-		m.state = "instalando"
+		if m.started.Equal(myStart) {
+			m.state = "instalando"
+		}
 		m.mu.Unlock()
 		reboot, err := wuaInstallDriverUpdates(ids)
 		m.mu.Lock()
 		defer m.mu.Unlock()
+		if !m.started.Equal(myStart) {
+			return // watchdog liberou ou nova operação assumiu
+		}
 		if err != nil {
 			m.state = "erro"
 			m.errMsg = err.Error()

@@ -633,18 +633,6 @@
       "undo": { "tipo": "restore" }
     },
     {
-      "id": "win.modern-standby-off",
-      "parte": 1, "categoria": "Windows",
-      "titulo": "Desativar Modern Standby (S0ix)",
-      "descricao": "Substitui o modo de suspensao moderno (S0ix) pelo modo S3 classico, que consome menos energia em repouso e evita que o PC desperte sozinho. Relevante principalmente em notebooks com S0ix.",
-      "tier": "amarelo", "modo": "acionavel", "impacto": "baixo",
-      "requer_reboot": true, "requer_consentimento": false, "toca_dados_pessoais": false,
-      "hardware_gate": null,
-      "detect": { "tipo": "registry", "hive": "HKLM", "path": "SYSTEM\\CurrentControlSet\\Control\\Power", "valores": [ { "name": "CsEnabled", "esperado": 0 } ] },
-      "action": { "tipo": "registry", "hive": "HKLM", "path": "SYSTEM\\CurrentControlSet\\Control\\Power", "valores": [ { "name": "CsEnabled", "value": 0, "value_type": "DWord" } ] },
-      "undo": { "tipo": "restore" }
-    },
-    {
       "id": "net.smb1-off",
       "parte": 9, "categoria": "Rede",
       "titulo": "Desativar SMB v1 (seguranca)",

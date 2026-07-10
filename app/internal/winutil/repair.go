@@ -156,7 +156,15 @@ func (m *RepairManager) stream(name string, args ...string) {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	sc.Split(scanLinesCR)
 	for sc.Scan() {
-		chunk := strings.TrimSpace(sc.Text())
+		// SFC escreve UTF-16LE quando o stdout é um pipe (DISM/CHKDSK são ANSI).
+		// Remover os bytes nulos recupera o texto ASCII (o %, o veredito final de
+		// corrupção) — sem isso o rePct nunca casava e o log vinha ilegível.
+		line := sc.Text()
+		if strings.IndexByte(line, 0) >= 0 {
+			line = strings.ReplaceAll(line, "\x00", "")
+			line = strings.TrimPrefix(line, "\xff\xfe") // BOM UTF-16LE
+		}
+		chunk := strings.TrimSpace(line)
 		if chunk == "" {
 			continue
 		}
