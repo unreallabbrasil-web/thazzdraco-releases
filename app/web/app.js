@@ -37,7 +37,12 @@ async function api(path, body) {
     ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
     : {};
   const r = await fetch(path, opt);
-  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (!r.ok) {
+    // tenta extrair a mensagem real do servidor em vez de só "HTTP 500"
+    let msg = "HTTP " + r.status;
+    try { const j = await r.json(); if (j && (j.erro || j.error)) msg = j.erro || j.error; } catch (e) {}
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -979,6 +984,7 @@ function addCustomGame() {
     return toast("info", "Jogo já adicionado", nome);
   }
   state.customJogos.push({ nome, loja: "Manual", pasta, exe, fso: false, gpu: false, prio: false, av: false });
+  try { localStorage.setItem("tz_custom_jogos", JSON.stringify(state.customJogos)); } catch (e) {} // persiste entre sessoes
   exeInput.value = ""; if (nameInput) nameInput.value = "";
   renderJogos();
   toast("ok", "Jogo adicionado", nome + " — configure os tweaks abaixo.");
@@ -1349,7 +1355,12 @@ function optimizeSection() {
 }
 async function undo(opts, label) {
   busy(true, "Desfazendo…");
-  try { afterMutation(await api("/api/desfazer", opts)); if (state.page === "historico") renderHistorico(); toast("ok", label || "Desfeito", "Restaurado."); }
+  try {
+    afterMutation(await api("/api/desfazer", opts));
+    if (opts && opts.tudo) $("#reboot")?.classList.remove("show"); // banner nao fica preso apos "Desfazer tudo"
+    if (state.page === "historico") renderHistorico();
+    toast("ok", label || "Desfeito", "Restaurado.");
+  }
   catch (e) { toast("err", "Falha ao desfazer", e.message); } finally { busy(false); }
 }
 
@@ -3595,6 +3606,9 @@ function scheduleUpdateCheck() {
 }
 
 async function boot() {
+  // jogos adicionados manualmente persistem entre sessões (os tweaks aplicados já
+  // ficavam no backend por exe; a lista, não).
+  try { const cj = localStorage.getItem("tz_custom_jogos"); if (cj) state.customJogos = JSON.parse(cj) || []; } catch (e) {}
   // #5 modo performance: respeita a escolha salva; senão auto-detecta PC fraco.
   let perfSaved = null; try { perfSaved = localStorage.getItem("tz_perf"); } catch (e) {}
   const perfAuto = (navigator.hardwareConcurrency || 8) <= 2 || matchMedia("(prefers-reduced-motion: reduce)").matches;
