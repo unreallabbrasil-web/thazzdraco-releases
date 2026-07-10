@@ -72,7 +72,14 @@ func main() {
 	}
 	url := fmt.Sprintf("http://%s/", ln.Addr().String())
 
-	httpSrv := &http.Server{Handler: srv.Handler()}
+	httpSrv := &http.Server{
+		Handler: srv.Handler(),
+		// ReadHeaderTimeout corta conexões que abrem o socket e não mandam headers
+		// (Slowloris local). NÃO definimos ReadTimeout/WriteTimeout: matariam o SSE
+		// de heartbeat (conexão longa) e respostas demoradas (backup/benchmark).
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go httpSrv.Serve(ln)
 
 	if *headless {

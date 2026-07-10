@@ -42,6 +42,7 @@ type Server struct {
 	lastPing time.Time
 	pingMu   sync.Mutex
 	inFlight int32 // requisicoes em andamento — o watchdog nunca encerra com >0
+	hbCount  int32 // conexoes SSE de heartbeat abertas (teto para nao travar o watchdog)
 
 	// F1: Modo Game ao Vivo
 	gameMu        sync.Mutex
@@ -317,6 +318,14 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)
 		return
 	}
+	// Teto de heartbeats simultâneos: a janela abre 1. Impede que conexões SSE
+	// acumuladas segurem inFlight>0 e neutralizem o watchdog (processo elevado órfão).
+	if atomic.AddInt32(&s.hbCount, 1) > 4 {
+		atomic.AddInt32(&s.hbCount, -1)
+		http.Error(w, "muitos heartbeats", http.StatusTooManyRequests)
+		return
+	}
+	defer atomic.AddInt32(&s.hbCount, -1)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -836,6 +845,12 @@ func (s *Server) handleServicoParar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false, "erro": "nome vazio"})
 		return
 	}
+	// Allowlist: só para serviços da lista de candidatos não-essenciais. Fecha o
+	// vetor de parar um serviço arbitrário (anticheat, Defender) via o processo elevado.
+	if !winutil.IsHeavyServiceCandidate(req.Nome) {
+		writeJSON(w, 403, map[string]any{"ok": false, "erro": "serviço não está na lista permitida"})
+		return
+	}
 	err := winutil.StopServiceNow(req.Nome)
 	resp := map[string]any{"ok": err == nil}
 	if err != nil {
@@ -1140,7 +1155,10 @@ func (s *Server) handleCustomPresetExcluir(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleCustomPresetAplicar(w http.ResponseWriter, r *http.Request) {
-	var req customPresetExcluirReq
+	var req struct {
+		ID        string `json:"id"`
+		Confirmar bool   `json:"confirmar"`
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	sid := winutil.RealUserSid()
 	ids := winutil.GetCustomPresetIDs(sid, req.ID)
@@ -1151,7 +1169,9 @@ func (s *Server) handleCustomPresetAplicar(w http.ResponseWriter, r *http.Reques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ctx := engine.BuildCtx()
-	rep := engine.ApplyRules(s.rules, ids, ctx, true, "preset-custom:"+req.ID)
+	// Respeita o consentimento: regras de risco só entram com confirmar=true (antes
+	// era hardcoded true, o que burlava o consentimento em presets customizados).
+	rep := engine.ApplyRules(s.rules, ids, ctx, req.Confirmar, "preset-custom:"+req.ID)
 	writeJSON(w, 200, map[string]any{"relatorio": rep, "scan": engine.Scan(s.rules, ctx)})
 }
 

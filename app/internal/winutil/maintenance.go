@@ -84,7 +84,9 @@ func UltimatePerformance() map[string]any {
 		}
 	}
 	// fallback seguro: Alto Desempenho clássico
-	RunPowercfg("/setactive", highPerfGUID)
+	if _, err := RunPowercfg("/setactive", highPerfGUID); err != nil {
+		return map[string]any{"ok": false, "mensagem": "Não foi possível ativar um plano de alto desempenho.", "erro": err.Error()}
+	}
 	return map[string]any{"ok": true, "mensagem": "Plano de alto desempenho ativado."}
 }
 

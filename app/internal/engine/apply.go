@@ -353,9 +353,14 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 		// (Ultimate); notebook -> Alto Desempenho (Ultimate fritaria a bateria).
 		undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setactive", Scheme: winutil.ActiveScheme()})
 		if ctxDesktop(ctx) {
-			winutil.UltimatePerformance()
+			res := winutil.UltimatePerformance()
+			if ok, _ := res["ok"].(bool); !ok {
+				return undo, 0, fmt.Errorf("falha ao ativar plano de desempenho máximo")
+			}
 		} else {
-			winutil.RunPowercfg("/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c")
+			if _, err := winutil.RunPowercfg("/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"); err != nil {
+				return undo, 0, err
+			}
 		}
 		return undo, 0, nil
 
@@ -424,13 +429,22 @@ func runCleanup(dirs []string) float64 {
 
 // ---- Desfazer ---------------------------------------------------------------
 
-func revertRule(ru RuleUndo) {
+// revertRule tenta reverter uma regra e devolve erro se ALGUMA restauração falhar
+// (ex.: rodou sem elevação e a escrita HKLM foi negada). O chamador usa isso para
+// NÃO remover do histórico o que não foi de fato revertido — senão a UI mostraria
+// "desfeito" com o sistema ainda alterado e a info de undo perdida para sempre.
+func revertRule(ru RuleUndo) error {
+	var errs []string
 	for _, snap := range ru.Regs {
-		_ = winutil.RestoreSnapshot(snap)
+		if err := winutil.RestoreSnapshot(snap); err != nil {
+			errs = append(errs, "reg "+snap.Name+": "+err.Error())
+		}
 	}
 	for _, s := range ru.Servicos {
 		if s.Existed {
-			_ = winutil.SetServiceStartType(s.Name, s.OldStartType)
+			if err := winutil.SetServiceStartType(s.Name, s.OldStartType); err != nil {
+				errs = append(errs, "svc "+s.Name+": "+err.Error())
+			}
 		}
 	}
 	// Powercfg em ordem reversa: restaura valores AC e reativa esquemas.
@@ -439,16 +453,25 @@ func revertRule(ru RuleUndo) {
 		switch p.Kind {
 		case "setacvalue":
 			if p.HadValue {
-				winutil.RunPowercfg("/setacvalueindex", "SCHEME_CURRENT", p.Sub, p.Setting, strconv.FormatInt(p.OldValue, 10))
+				if _, err := winutil.RunPowercfg("/setacvalueindex", "SCHEME_CURRENT", p.Sub, p.Setting, strconv.FormatInt(p.OldValue, 10)); err != nil {
+					errs = append(errs, "powercfg "+p.Setting+": "+err.Error())
+				}
 				winutil.RunPowercfg("/setactive", "SCHEME_CURRENT")
 			}
 		case "setactive":
 			if p.Scheme != "" {
-				winutil.RunPowercfg("/setactive", p.Scheme)
+				if _, err := winutil.RunPowercfg("/setactive", p.Scheme); err != nil {
+					errs = append(errs, "powercfg esquema: "+err.Error())
+				}
 			}
 		}
 	}
+	if len(errs) > 0 {
+		logOp(fmt.Sprintf("[%s] FALHA-UNDO %-34s %s", time.Now().Format("2006-01-02 15:04:05"), ru.RuleID, strings.Join(errs, "; ")))
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
 	logOp(fmt.Sprintf("[%s] DESFEITO  %-34s %s", time.Now().Format("2006-01-02 15:04:05"), ru.RuleID, ru.Titulo))
+	return nil
 }
 
 // UndoBatch desfaz um lote inteiro e o remove do historico.
@@ -466,13 +489,27 @@ func UndoBatch(batchID string) (int, error) {
 	if idx < 0 {
 		return 0, fmt.Errorf("lote nao encontrado: %s", batchID)
 	}
-	n := len(h[idx].Rules)
+	var kept []RuleUndo
+	var falhas []string
+	reverted := 0
 	for i := len(h[idx].Rules) - 1; i >= 0; i-- {
-		revertRule(h[idx].Rules[i])
+		if err := revertRule(h[idx].Rules[i]); err != nil {
+			kept = append(kept, h[idx].Rules[i]) // mantém no histórico p/ nova tentativa
+			falhas = append(falhas, h[idx].Rules[i].RuleID)
+		} else {
+			reverted++
+		}
 	}
-	h = append(h[:idx], h[idx+1:]...)
+	if len(kept) == 0 {
+		h = append(h[:idx], h[idx+1:]...) // tudo revertido: remove o lote
+	} else {
+		h[idx].Rules = kept // guarda só o que faltou reverter
+	}
 	saveHistoryLocked(h)
-	return n, nil
+	if len(falhas) > 0 {
+		return reverted, fmt.Errorf("falha ao reverter %d regra(s) (sem permissão?): %s", len(falhas), strings.Join(falhas, ", "))
+	}
+	return reverted, nil
 }
 
 // UndoRule desfaz a aplicacao mais recente de uma regra especifica.
@@ -483,7 +520,9 @@ func UndoRule(ruleID string) error {
 	for bi := len(h) - 1; bi >= 0; bi-- {
 		for ri := len(h[bi].Rules) - 1; ri >= 0; ri-- {
 			if h[bi].Rules[ri].RuleID == ruleID {
-				revertRule(h[bi].Rules[ri])
+				if err := revertRule(h[bi].Rules[ri]); err != nil {
+					return err // não remove do histórico: reversão falhou
+				}
 				h[bi].Rules = append(h[bi].Rules[:ri], h[bi].Rules[ri+1:]...)
 				if len(h[bi].Rules) == 0 {
 					h = append(h[:bi], h[bi+1:]...)
@@ -496,18 +535,30 @@ func UndoRule(ruleID string) error {
 	return fmt.Errorf("regra nao encontrada no historico: %s", ruleID)
 }
 
-// UndoAll desfaz todos os lotes (mais novos primeiro) e limpa o historico.
+// UndoAll desfaz todos os lotes (mais novos primeiro). Mantém no histórico só o
+// que NÃO conseguiu reverter, para nova tentativa — nunca apaga o que continua
+// aplicado. Devolve quantas regras foram de fato revertidas.
 func UndoAll() int {
 	histMu.Lock()
 	defer histMu.Unlock()
 	h := loadHistoryLocked()
 	count := 0
-	for bi := len(h) - 1; bi >= 0; bi-- {
+	var restante []BatchRecord
+	for bi := 0; bi < len(h); bi++ {
+		var kept []RuleUndo
 		for ri := len(h[bi].Rules) - 1; ri >= 0; ri-- {
-			revertRule(h[bi].Rules[ri])
-			count++
+			if err := revertRule(h[bi].Rules[ri]); err != nil {
+				kept = append(kept, h[bi].Rules[ri])
+			} else {
+				count++
+			}
+		}
+		if len(kept) > 0 {
+			b := h[bi]
+			b.Rules = kept
+			restante = append(restante, b)
 		}
 	}
-	saveHistoryLocked(nil)
+	saveHistoryLocked(restante)
 	return count
 }

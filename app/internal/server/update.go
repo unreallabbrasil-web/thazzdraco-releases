@@ -108,6 +108,12 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 
 	go func() {
+		// Espera qualquer operação do motor (mu) ou destrutiva pesada (opMu) terminar
+		// antes de trocar o exe e sair — senão o os.Exit do self-replace abortaria um
+		// backup/reparo/limpeza no meio. Nenhum caminho segura os dois locks juntos,
+		// então adquiri-los aqui em sequência não gera deadlock.
+		s.mu.Lock()
+		s.opMu.Lock()
 		time.Sleep(150 * time.Millisecond)
 		winutil.SelfReplaceAndRestart(tmpExe)
 	}()

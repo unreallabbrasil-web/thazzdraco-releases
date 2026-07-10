@@ -3,6 +3,8 @@
 package winutil
 
 import (
+	"strings"
+
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -134,6 +136,18 @@ func HeavyServices() []ServiceInfo {
 		return []ServiceInfo{}
 	}
 	return out
+}
+
+// IsHeavyServiceCandidate diz se o nome está na allowlist de serviços não-essenciais
+// que o app pode parar. Impede que um pedido forjado pare um serviço arbitrário
+// (ex.: um anticheat, o próprio Defender) através do processo elevado.
+func IsHeavyServiceCandidate(name string) bool {
+	for _, c := range candidatosServicos {
+		if strings.EqualFold(c.Nome, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // StopServiceNow para um serviço (sem desabilitar permanentemente). Requer elevação.
