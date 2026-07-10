@@ -77,6 +77,8 @@ func main() {
 
 	if *headless {
 		fmt.Println("ThazzDraco headless em", url)
+		fmt.Println("token de sessao:", srv.Token())
+		fmt.Println("teste: curl -H \"X-TZ-Token: <token>\" " + url + "api/escanear")
 		select {} // mantem rodando para testes manuais
 	}
 

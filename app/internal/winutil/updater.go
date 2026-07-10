@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,21 @@ import (
 	"syscall"
 	"time"
 )
+
+// isTrustedUpdateURL só aceita HTTPS em hosts do GitHub. O updater substitui o
+// binário em execução e o relança COMO ADMIN — um download de host arbitrário
+// seria execução remota de código. Validar antes de baixar e em cada redirect.
+func isTrustedUpdateURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "github.com" || host == "api.github.com" {
+		return true
+	}
+	return strings.HasSuffix(host, ".githubusercontent.com")
+}
 
 // UpdateInfo descreve uma versão nova disponível no GitHub.
 type UpdateInfo struct {
@@ -122,7 +138,7 @@ func fetchUpdate(ctx context.Context, current string) (*UpdateInfo, bool) {
 
 	downloadURL := ""
 	for _, a := range release.Assets {
-		if strings.HasSuffix(strings.ToLower(a.Name), ".exe") {
+		if strings.HasSuffix(strings.ToLower(a.Name), ".exe") && isTrustedUpdateURL(a.BrowserDownloadURL) {
 			downloadURL = a.BrowserDownloadURL
 			break
 		}
@@ -170,13 +186,29 @@ func semverParts(v string) [3]int {
 // DownloadExe baixa o exe de url para um arquivo temporário.
 // progress(downloaded, total) é chamado a cada chunk; total pode ser -1.
 func DownloadExe(url string, progress func(int64, int64)) (string, error) {
+	if !isTrustedUpdateURL(url) {
+		return "", fmt.Errorf("URL de update não confiável (esperado https em github.com): %s", url)
+	}
 	tmp, err := os.CreateTemp("", "ThazzDraco_update_*.exe")
 	if err != nil {
 		return "", fmt.Errorf("criar temp: %w", err)
 	}
 	tmpPath := tmp.Name()
 
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := &http.Client{
+		Timeout: 10 * time.Minute,
+		// GitHub redireciona o browser_download_url para *.githubusercontent.com —
+		// cada salto tem de continuar em host confiável, senão aborta.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("excesso de redirecionamentos")
+			}
+			if !isTrustedUpdateURL(req.URL.String()) {
+				return fmt.Errorf("redirecionamento para host não confiável: %s", req.URL.Host)
+			}
+			return nil
+		},
+	}
 	resp, err := client.Get(url)
 	if err != nil {
 		tmp.Close(); os.Remove(tmpPath)

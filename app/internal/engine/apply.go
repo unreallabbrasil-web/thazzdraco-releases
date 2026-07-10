@@ -91,6 +91,36 @@ func saveHistoryLocked(h []BatchRecord) {
 	writeFileAtomic(histPath(), b)
 }
 
+// hasData diz se um RuleUndo carrega algum snapshot reversível.
+func (u *RuleUndo) hasData() bool {
+	return u != nil && (len(u.Regs) > 0 || len(u.Servicos) > 0 || len(u.Powercfg) > 0)
+}
+
+// persistBatch grava o lote no histórico de forma incremental (write-ahead):
+// insere ou substitui o registro com o mesmo ID. Chamado após CADA regra que
+// produz undo, para que um crash/kill no meio do lote não apague os snapshots já
+// escritos — a rede de segurança do undo exato precisa sobreviver a falha parcial.
+func persistBatch(batch BatchRecord) {
+	if len(batch.Rules) == 0 {
+		return
+	}
+	histMu.Lock()
+	defer histMu.Unlock()
+	h := loadHistoryLocked()
+	found := false
+	for i := range h {
+		if h[i].ID == batch.ID {
+			h[i] = batch
+			found = true
+			break
+		}
+	}
+	if !found {
+		h = append(h, batch)
+	}
+	saveHistoryLocked(h)
+}
+
 // writeFileAtomic grava num arquivo temporario e renomeia por cima (atomico no
 // NTFS). Evita deixar o JSON truncado/corrompido se o processo morrer no meio da
 // escrita — protege o historico de undo e os backups, que sao a rede de seguranca.
@@ -232,8 +262,17 @@ func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem stri
 		}
 
 		undo, freed, err := applyAction(r, ctx)
+		// Persiste o snapshot ANTES de tratar o erro: se a escrita falhou no meio
+		// (ex.: 3ª de 4 chaves), os valores já escritos precisam ficar no histórico
+		// para o undo exato — senão a escrita parcial fica órfã, sem reversão.
+		if undo.hasData() {
+			batch.Rules = append(batch.Rules, *undo)
+			rep.BatchID = batch.ID
+			persistBatch(batch) // write-ahead: cada regra é gravada na hora
+		}
 		if err != nil {
 			rep.Erros[id] = err.Error()
+			logApplied(batch.Quando, r, undo, 0)
 			continue
 		}
 		rep.Aplicadas = append(rep.Aplicadas, id)
@@ -241,18 +280,7 @@ func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem stri
 		if r.RequerReboot {
 			rep.RequerReboot = true
 		}
-		if undo != nil {
-			batch.Rules = append(batch.Rules, *undo)
-		}
 		logApplied(batch.Quando, r, undo, freed)
-	}
-
-	if len(batch.Rules) > 0 {
-		histMu.Lock()
-		h := append(loadHistoryLocked(), batch)
-		saveHistoryLocked(h)
-		histMu.Unlock()
-		rep.BatchID = batch.ID
 	}
 	return rep
 }

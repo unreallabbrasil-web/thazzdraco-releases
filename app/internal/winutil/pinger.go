@@ -37,14 +37,22 @@ func PingHost(host string) PingResult {
 	res := PingResult{Host: host, Enviados: 5}
 	out, _ := runCapture("ping", "-n", "5", host)
 
-	if m := reLoss.FindStringSubmatch(out); len(m) == 2 {
-		if pct, e := strconv.Atoi(m[1]); e == nil {
-			res.PctPerda = pct
-			res.Perdidos = (pct * res.Enviados) / 100
-			res.Recebidos = res.Enviados - res.Perdidos
-		}
-	} else {
-		res.Recebidos = res.Enviados
+	// Só há dado real de perda quando o ping imprime a linha de estatísticas
+	// ("(x% loss)" / "(x% de perda)"). Sem essa linha, o host não respondeu — DNS
+	// falhou, ICMP bloqueado ou binário retornou erro. NUNCA assumir 0% de perda
+	// nesse caso (viola "só mostrar dado real"): marca como inacessível.
+	m := reLoss.FindStringSubmatch(out)
+	if m == nil {
+		res.PctPerda = 100
+		res.Perdidos = res.Enviados
+		res.Recebidos = 0
+		res.Erro = "Host inacessível ou sem resposta ICMP"
+		return res
+	}
+	if pct, e := strconv.Atoi(m[1]); e == nil {
+		res.PctPerda = pct
+		res.Perdidos = (pct * res.Enviados) / 100
+		res.Recebidos = res.Enviados - res.Perdidos
 	}
 
 	// Extrair min/max/avg da linha de estatísticas

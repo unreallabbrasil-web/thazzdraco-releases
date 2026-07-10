@@ -79,7 +79,7 @@ function set(id, pct, label, sub, isTemp) {
 function pad(n){return String(n).padStart(2,"0")}
 async function poll() {
   try {
-    const r = await fetch("/api/metrics");
+    const r = await fetch("/api/metricas");
     const m = await r.json();
     const now = new Date();
     document.getElementById("ts").textContent = pad(now.getHours())+":"+pad(now.getMinutes())+":"+pad(now.getSeconds());
