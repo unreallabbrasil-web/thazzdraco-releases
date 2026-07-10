@@ -281,13 +281,18 @@ func checkDGPUNotebook() *Gargalo {
 	if !laptop {
 		return nil
 	}
-	hasDGPU := false
+	// dGPU real num notebook = NVIDIA presente (num laptop é sempre discreta, via
+	// Optimus) OU dois adaptadores físicos distintos (iGPU + dGPU). Só "Vendor==AMD"
+	// dava falso positivo: "AMD Radeon(TM) Graphics" é a iGPU do Ryzen, não uma placa
+	// dedicada — um notebook Ryzen sem dGPU recebia o aviso à toa.
+	hasNvidia, count := false, 0
 	for _, g := range GPUs() {
-		if g.Vendor == "NVIDIA" || g.Vendor == "AMD" {
-			hasDGPU = true
+		count++
+		if g.Vendor == "NVIDIA" {
+			hasNvidia = true
 		}
 	}
-	if !hasDGPU {
+	if !hasNvidia && count < 2 {
 		return nil
 	}
 	return &Gargalo{

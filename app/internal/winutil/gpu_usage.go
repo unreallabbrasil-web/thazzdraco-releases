@@ -37,6 +37,11 @@ var (
 	vramUsedCounter uintptr
 	vramTotCounter  uintptr
 	vramOK          bool
+
+	// PDH não é thread-safe por query: dois handlers HTTP concorrentes (métricas +
+	// painel de GPU) fazendo Collect/GetArray ao mesmo tempo corrompem o resultado.
+	// Serializa todas as leituras PDH desta unidade.
+	pdhMu sync.Mutex
 )
 
 const (
@@ -86,11 +91,14 @@ func thermalInit() {
 	if r, _, _ := pPdhOpen.Call(0, 0, uintptr(unsafe.Pointer(&thermalQuery))); r != 0 {
 		return
 	}
+	pPdhClose := pdhDLL.NewProc("PdhCloseQuery")
 	path, err := windows.UTF16PtrFromString(`\Thermal Zone Information(*)\Temperature`)
 	if err != nil {
+		pPdhClose.Call(thermalQuery) // nao vaza o handle da query
 		return
 	}
 	if r, _, _ := pPdhAddEng.Call(thermalQuery, uintptr(unsafe.Pointer(path)), 0, uintptr(unsafe.Pointer(&thermalCounter))); r != 0 {
+		pPdhClose.Call(thermalQuery)
 		return
 	}
 	pPdhCollect.Call(thermalQuery)
@@ -104,6 +112,8 @@ func CPUTempC() int {
 	if !thermalOK {
 		return -1
 	}
+	pdhMu.Lock()
+	defer pdhMu.Unlock()
 	if r, _, _ := pPdhCollect.Call(thermalQuery); r != 0 {
 		return -1
 	}
@@ -147,6 +157,8 @@ func GpuUsageUniversal() (int, bool) {
 	if !gpuPdhOK {
 		return 0, false
 	}
+	pdhMu.Lock()
+	defer pdhMu.Unlock()
 	if r, _, _ := pPdhCollect.Call(gpuPdhQuery); r != 0 {
 		return 0, false
 	}
@@ -234,6 +246,8 @@ func VramMB() (int, int, bool) {
 	if !vramOK {
 		return 0, 0, false
 	}
+	pdhMu.Lock()
+	defer pdhMu.Unlock()
 	if r, _, _ := pPdhCollect.Call(vramQuery); r != 0 {
 		return 0, 0, false
 	}

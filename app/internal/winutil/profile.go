@@ -23,18 +23,17 @@ import (
 //   - discos ............ IOCTL_STORAGE_QUERY_PROPERTY (seek penalty => SSD/HDD)
 //   - dns ............... GetAdaptersAddresses
 func BuildProfile() map[string]any {
-	tipo := "desktop"
-	naBateria := false
-	if temBateria, emBateria, ok := powerStatus(); ok {
-		if temBateria {
-			tipo = "notebook"
-		}
-		naBateria = emBateria
-	}
-
+	// O tipo vem do CHASSI SMBIOS (sinal autoritativo), não da mera presença de
+	// bateria: um nobreak/UPS USB reporta bateria num desktop e o classificava como
+	// notebook, ativando gates errados (ex.: "não mexer em energia na bateria").
 	ramRated, ramConfigured, chassisLaptop := smbiosInfo()
+	tipo := "desktop"
 	if chassisLaptop {
 		tipo = "notebook"
+	}
+	naBateria := false
+	if _, emBateria, ok := powerStatus(); ok {
+		naBateria = emBateria && chassisLaptop // "na bateria" só faz sentido em notebook
 	}
 
 	ramTotalGB := totalRAMGB()
@@ -318,10 +317,7 @@ func diskTypes() []map[string]any {
 		path := fmt.Sprintf(`\\.\PhysicalDrive%d`, n)
 		t, ok := seekPenalty(path)
 		if !ok {
-			if n == 0 {
-				continue // primeiro indice pode falhar; tenta os proximos
-			}
-			break
+			continue // disco ausente NESTE indice; numeros nao sao contiguos (RAID/USB removido)
 		}
 		disco := map[string]any{"tipo": t, "midia": t, "numero": n, "sistema": n == sysDisk}
 		// O disco do sistema vai para o indice 0 (gates de SSD usam discos[0]).
