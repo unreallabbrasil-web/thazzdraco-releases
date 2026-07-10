@@ -31,6 +31,8 @@ func coverCachePath() string {
 }
 
 func loadCoverCache() {
+	coverMu.Lock()
+	defer coverMu.Unlock()
 	if coverLoaded {
 		return
 	}
@@ -39,8 +41,6 @@ func loadCoverCache() {
 	if err != nil {
 		return
 	}
-	coverMu.Lock()
-	defer coverMu.Unlock()
 	json.Unmarshal(raw, &coverMap) //nolint:errcheck
 }
 
@@ -58,19 +58,24 @@ func flushCoverCache() {
 	os.WriteFile(p, raw, 0o644) //nolint:errcheck
 }
 
-// steamSearch retorna o app_id Steam do primeiro resultado que case com o nome.
-func steamSearch(ctx context.Context, name string) int {
+// steamSearch retorna (app_id, completou). completou=false indica erro de
+// transporte (rede/HTTP): o chamador NÃO deve cachear nesse caso. completou=true
+// com id=0 significa "busca ok, sem correspondência" — aí pode cachear o vazio.
+func steamSearch(ctx context.Context, name string) (int, bool) {
 	u := "https://store.steampowered.com/api/storesearch/?term=" + url.QueryEscape(name) + "&l=english&cc=US"
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0
+		return 0, false // erro de rede — não cacheia
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return 0, false // rate-limit/erro do servidor — não cacheia
+	}
 
 	var result struct {
 		Items []struct {
@@ -78,18 +83,20 @@ func steamSearch(ctx context.Context, name string) int {
 			Name string `json:"name"`
 		} `json:"items"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&result) != nil || len(result.Items) == 0 {
-		return 0
+	if json.NewDecoder(resp.Body).Decode(&result) != nil {
+		return 0, false
 	}
 
 	nameLower := strings.ToLower(name)
 	for _, item := range result.Items {
 		n := strings.ToLower(item.Name)
 		if n == nameLower || strings.Contains(n, nameLower) || strings.Contains(nameLower, n) {
-			return item.ID
+			return item.ID, true
 		}
 	}
-	return result.Items[0].ID
+	// Nenhum resultado casou o nome: melhor SEM capa do que a capa de outro jogo
+	// (Items[0] poderia ser um título totalmente diferente).
+	return 0, true
 }
 
 // ResolveCoverURL devolve a URL da capa portrait de um jogo, buscando na Steam
@@ -107,14 +114,17 @@ func ResolveCoverURL(ctx context.Context, name string) string {
 	}
 	coverMu.Unlock()
 
-	appID := steamSearch(ctx, name)
+	appID, done := steamSearch(ctx, name)
+	if !done {
+		return "" // erro de transporte: não cacheia, tentará de novo numa próxima vez
+	}
 	var coverURL string
 	if appID > 0 {
 		coverURL = fmt.Sprintf("https://cdn.steamstatic.com/steam/apps/%d/library_600x900.jpg", appID)
 	}
 
 	coverMu.Lock()
-	coverMap[key] = coverURL
+	coverMap[key] = coverURL // busca completou (achou ou não) — cacheia o resultado
 	coverDirty = true
 	coverMu.Unlock()
 

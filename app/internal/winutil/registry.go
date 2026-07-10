@@ -270,6 +270,23 @@ func RemoveValue(hive, sid string, hkcuReal bool, path, name string) {
 	_ = k.DeleteValue(name)
 }
 
+// DeleteKeyIfEmpty apaga a chave se ela não tiver mais valores nem subchaves. Usado
+// para não deixar chaves IFEO (Image File Execution Options) vazias para trás ao
+// reverter a prioridade por-jogo — chaves IFEO residuais disparam heurística de AV.
+func DeleteKeyIfEmpty(hive, sid string, hkcuReal bool, path string) {
+	root, sub := resolve(hive, sid, hkcuReal, path)
+	k, err := registry.OpenKey(root, sub, registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS)
+	if err != nil {
+		return
+	}
+	vals, _ := k.ReadValueNames(1)
+	subs, _ := k.ReadSubKeyNames(1)
+	k.Close()
+	if len(vals) == 0 && len(subs) == 0 {
+		_ = registry.DeleteKey(root, sub)
+	}
+}
+
 // RealUserProfileDir devolve a pasta de perfil (ex.: C:\Users\fulano) do usuario
 // dono do SID, lendo ProfileImagePath em ProfileList. Usado para limpar o TEMP
 // do usuario interativo correto quando o app roda elevado (e nao o do admin).

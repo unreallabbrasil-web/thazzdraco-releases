@@ -86,17 +86,46 @@ func OptimizeSSDs() map[string]any {
 
 const highPerfGUID = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
 
+// ultimateGUIDPath guarda o GUID da cópia visível do plano Ultimate que criamos,
+// para reusá-la em vez de duplicar o template a cada ativação (o match por nome
+// falha em Windows PT-BR pelo codepage OEM da saída do powercfg).
+func ultimateGUIDPath() string {
+	dir := filepath.Join(os.Getenv("ProgramData"), "ThazzDraco")
+	os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "ultimate-plan.guid")
+}
+
+// schemeExists diz se um GUID de plano ainda aparece em `powercfg /list`.
+func schemeExists(guid string) bool {
+	out, _ := RunPowercfg("/list")
+	return strings.Contains(strings.ToLower(out), strings.ToLower(guid))
+}
+
 // UltimatePerformance ATIVA o plano "Desempenho Máximo Final" (Ultimate). O
 // template é oculto e não ativável direto: reusa uma cópia visível se já existe,
 // senão cria uma (com GUID próprio). Cai para Alto Desempenho se não rolar.
 func UltimatePerformance() map[string]any {
 	const tmpl = "e9a42b02-d5df-448d-aa00-03f14749eb61"
-	// 1) reusa um plano "Ultimate/Máximo" já criado (evita acumular cópias).
-	guid := FindSchemeGUIDByName("ultimate", "máximo", "maximo", "desempenho máximo")
+	// 1) reusa o GUID que JÁ criamos antes (salvo em disco). Independe de idioma —
+	//    em Windows PT-BR o nome do plano vem em codepage OEM e o match por nome
+	//    ("máximo") nunca casava, criando uma cópia nova do plano a CADA clique.
+	guid := ""
+	if b, err := os.ReadFile(ultimateGUIDPath()); err == nil {
+		if g := strings.TrimSpace(string(b)); reGUID.MatchString(g) && schemeExists(g) {
+			guid = g
+		}
+	}
+	// 2) senão, tenta por nome (funciona em Windows EN).
 	if guid == "" {
-		// 2) cria uma cópia visível do template e pega o GUID novo da saída.
+		guid = FindSchemeGUIDByName("ultimate", "máximo", "maximo", "desempenho máximo")
+	}
+	// 3) senão, cria uma cópia visível do template e SALVA o GUID novo p/ reuso.
+	if guid == "" || guid == tmpl {
 		out, _ := RunPowercfg("-duplicatescheme", tmpl)
 		guid = reGUID.FindString(out)
+		if guid != "" {
+			os.WriteFile(ultimateGUIDPath(), []byte(guid), 0o644)
+		}
 	}
 	if guid != "" && guid != tmpl {
 		if _, err := RunPowercfg("/setactive", guid); err == nil {
