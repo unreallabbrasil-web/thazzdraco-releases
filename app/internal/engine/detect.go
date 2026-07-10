@@ -54,7 +54,11 @@ func DetectRule(r *Rule, ctx Ctx) DetectResult {
 		return detectService(d)
 	case "cleanup-size":
 		mb := cleanupSizeMB(cleanupTargets(ctx, d.Alvos))
-		return DetectResult{"oportunidade", fmt.Sprintf("%.1f MB em temporarios", mb)}
+		estado := "oportunidade"
+		if mb < 1 {
+			estado = "ok" // nada relevante para limpar: não mostra oportunidade vazia
+		}
+		return DetectResult{estado, fmt.Sprintf("%.1f MB em temporarios", mb)}
 	case "profile-compara":
 		return detectProfileCompara(d, ctx)
 	case "dns-check":

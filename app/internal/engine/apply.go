@@ -60,6 +60,9 @@ var histMu sync.Mutex
 func dataDir() string {
 	base := os.Getenv("ProgramData")
 	if base == "" {
+		base = os.Getenv("LOCALAPPDATA") // evita o TEMP, que a regra de limpeza varre
+	}
+	if base == "" {
 		base = os.TempDir()
 	}
 	d := filepath.Join(base, "ThazzDraco")

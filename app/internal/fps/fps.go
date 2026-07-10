@@ -67,7 +67,15 @@ func ensurePresentMon() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "ThazzDraco")
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		if c, err := os.UserCacheDir(); err == nil {
+			base = c
+		} else {
+			base = os.TempDir() // nunca deixa cair num caminho relativo ao cwd
+		}
+	}
+	dir := filepath.Join(base, "ThazzDraco")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

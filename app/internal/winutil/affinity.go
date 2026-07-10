@@ -37,12 +37,24 @@ type systemInfoStruct struct {
 	ProcessorRevision         uint16
 }
 
-var procGetSystemInfoW = kernel32.NewProc("GetSystemInfo")
+var (
+	procGetSystemInfoW          = kernel32.NewProc("GetSystemInfo")
+	procGetActiveProcessorCount = kernel32.NewProc("GetActiveProcessorCount")
+)
+
+const allProcessorGroups = 0xffff
 
 func logicalCoreCount() (int, uint64) {
 	var si systemInfoStruct
 	procGetSystemInfoW.Call(uintptr(unsafe.Pointer(&si)))
-	return int(si.NumberOfProcessors), uint64(si.ActiveProcessorMask)
+	count := int(si.NumberOfProcessors)
+	// GetSystemInfo só enxerga o grupo de processadores atual (máx. 64). Em CPUs com
+	// mais de 64 threads (Threadripper) o total sai errado — GetActiveProcessorCount
+	// com ALL_PROCESSOR_GROUPS corrige a contagem.
+	if r, _, _ := procGetActiveProcessorCount.Call(uintptr(allProcessorGroups)); r > 0 {
+		count = int(r)
+	}
+	return count, uint64(si.ActiveProcessorMask)
 }
 
 func popcount64(n uint64) int {

@@ -231,7 +231,10 @@ func dirSizeMB(root string) int {
 			return nil
 		}
 		if d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
-			return filepath.SkipDir // nunca seguir junction/symlink filho
+			if d.IsDir() {
+				return filepath.SkipDir // nunca seguir junction/symlink de diretório
+			}
+			return nil // arquivo com reparse point: pula só ele, não o diretório inteiro
 		}
 		if !d.IsDir() {
 			if info, e := d.Info(); e == nil {
