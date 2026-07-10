@@ -34,7 +34,11 @@ func loadCustomPresetsFile(sid string) customPresetsFile {
 		return customPresetsFile{}
 	}
 	var f customPresetsFile
-	json.Unmarshal(data, &f)
+	if err := json.Unmarshal(data, &f); err != nil {
+		// JSON corrompido: guarda o original em .corrupt.bak antes que o próximo
+		// SaveCustomPreset o sobrescreva (senão o usuário perderia todos os presets).
+		_ = os.WriteFile(p+".corrupt.bak", data, 0644)
+	}
 	return f
 }
 

@@ -146,7 +146,6 @@ var gameCatalog = []gameDef{
 			{Key: "setting.defaultres,setting.defaultresheight", Label: "Resolução", Type: "res", Options: resOpts},
 			{Key: "setting.fullscreen", Label: "Modo de tela", Type: "enum", Options: []CfgOpt{
 				{Label: "Tela cheia", Value: "1"},
-				{Label: "Sem borda (Borderless)", Value: "0"},
 				{Label: "Janela", Value: "0"},
 			}},
 			{Key: "setting.gpu_level", Label: "Detalhe de shader", Type: "enum", Options: qualOpts},
@@ -222,7 +221,7 @@ var gameCatalog = []gameDef{
 		},
 	},
 	{
-		exeSubstr:  "bf1_x64.exe",
+		exeSubstr:  "bf1.exe",
 		gameLabel:  "Battlefield 1",
 		configPath: `%USERPROFILE%\Documents\Battlefield 1\settings\PROFSAVE_profile`,
 		format:     "frostbite",

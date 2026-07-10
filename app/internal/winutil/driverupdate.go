@@ -401,6 +401,7 @@ func propStr(disp *ole.IDispatch, name string) string {
 	if err != nil || v == nil {
 		return ""
 	}
+	defer v.Clear() // libera o BSTR — sem isto, cada Title/Description vazava
 	return v.ToString()
 }
 

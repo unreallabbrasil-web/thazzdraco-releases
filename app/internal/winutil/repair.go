@@ -215,6 +215,14 @@ func (m *RepairManager) windowsUpdateReset() {
 	if win == "" {
 		win = `C:\Windows`
 	}
+	// Remove os .bak de resets anteriores — acumulavam GBs para sempre (nada os limpava).
+	for _, pat := range []string{filepath.Join(win, "SoftwareDistribution.bak-*"), filepath.Join(win, "System32", "catroot2.bak-*")} {
+		if olds, _ := filepath.Glob(pat); olds != nil {
+			for _, o := range olds {
+				os.RemoveAll(o)
+			}
+		}
+	}
 	stamp := time.Now().Format("20060102-150405")
 	renames := map[string]string{
 		filepath.Join(win, "SoftwareDistribution"):    filepath.Join(win, "SoftwareDistribution.bak-"+stamp),
