@@ -221,6 +221,10 @@ func (s *Server) securityGuard(next http.Handler) http.Handler {
 				http.Error(w, "sessao nao autenticada", http.StatusForbidden)
 				return
 			}
+			// Teto de tamanho do corpo (4 MB): os decodes JSON dos handlers não tinham
+			// limite — um corpo gigante consumia memória arbitrária. 4 MB cobre com
+			// folga o maior payload real (importar lista de jogos).
+			r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 		} else {
 			// Servindo HTML/estáticos para a janela: carimba o cookie de sessão a
 			// cada carga de página, garantindo que a janela sempre tenha o token
@@ -354,6 +358,13 @@ func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleRebuild(w http.ResponseWriter, _ *http.Request) {
+	// Endpoint de DESENVOLVIMENTO (roda CONSTRUIR.ps1). Fica desligado no binário
+	// distribuído — só responde quando TZ_DEV=1 no ambiente. Sem isso, um app
+	// elevado executando um .ps1 do diretório-pai é superfície de ataque.
+	if os.Getenv("TZ_DEV") != "1" {
+		writeJSON(w, 403, map[string]any{"ok": false, "erro": "rebuild desabilitado (modo de desenvolvimento)"})
+		return
+	}
 	// Localiza CONSTRUIR.ps1 dois níveis acima do executável
 	exe, err := os.Executable()
 	if err != nil {
