@@ -1085,8 +1085,17 @@ function bkRestore(id) {
   });
 }
 async function bkDelete(id) {
-  try { await api("/api/backup/excluir", { id }); openBackup(); toast("info", "Backup excluído", ""); }
-  catch (e) { toast("err", "Falha", e.message); }
+  // Confirma: o "✕" fica colado no "Restaurar"; um clique errado apagava a rede de
+  // segurança do cliente sem volta.
+  confirmModal({
+    title: "Excluir este backup?",
+    body: "<p>Apaga permanentemente este ponto de restauração do PC. Esta ação <b>não pode ser desfeita</b>.</p>",
+    okLabel: "Excluir", danger: true,
+    onOk: async () => {
+      try { await api("/api/backup/excluir", { id }); openBackup(); toast("info", "Backup excluído", ""); }
+      catch (e) { toast("err", "Falha", e.message); }
+    }
+  });
 }
 
 async function openReport() {
@@ -1110,7 +1119,7 @@ async function openReport() {
         ${fpsB ? `<div class="col"><span>FPS antes</span><b>${fpsB.fps_avg}</b></div><div class="arrow">→</div>` : ""}
         <div class="col"><span>FPS médio</span><b style="color:#1a9e6b">${fps.fps_avg}</b></div>
         <div class="col"><span>1% low</span><b>${fps.low1}</b></div>
-        <div class="col"><span>0.1% low</span><b>${fps.low01}</b></div>
+        ${fps.low01 ? `<div class="col"><span>0.1% low</span><b>${fps.low01}</b></div>` : ""}
         ${ganho != null ? `<div class="col" style="margin-left:auto;text-align:right"><span>Ganho</span><b style="color:#1a9e6b">${ganho > 0 ? "+" : ""}${ganho}%</b></div>` : ""}
       </div>`;
   }
@@ -1448,6 +1457,8 @@ function wire() {
   // F1: Modo Game ao Vivo — toggle
   const lgbToggle = $("#lgbToggle");
   if (lgbToggle) lgbToggle.onclick = async () => {
+    if (lgbToggle.dataset.busy) return; // guarda contra duplo clique (dessincronizava UI×backend)
+    lgbToggle.dataset.busy = "1";
     const isOn = lgbToggle.classList.contains("on");
     try {
       await api("/api/modo-game/set", { ativo: !isOn });
@@ -1455,6 +1466,7 @@ function wire() {
       updateLiveGameBar(!isOn, []);
       if (!isOn) startLiveGamePoll(); else stopLiveGamePoll();
     } catch (e) { toast("err", "Falha", e.message); }
+    finally { delete lgbToggle.dataset.busy; }
   };
   $("#search").oninput = debounce((e) => { state.query = e.target.value.trim(); renderOtimRules(); }, 250);
   $("#btnUndoAll").onclick = () => confirmModal({ title: "Desfazer tudo?", body: "Reverte todas as otimizações aplicadas, restaurando os valores anteriores.", okLabel: "Desfazer tudo", danger: true, onOk: () => undo({ tudo: true }, "Tudo desfeito") });
@@ -1524,7 +1536,7 @@ async function renderGpu() {
     liveBox.innerHTML = `<div class="bench-grid gpu-live-grid">${gpus.map(g => `<div class="bench-card">
       <div class="bench-h">${escHtml(g.nome || "GPU")}</div>
       <div class="bench-v">${g.uso_pct ?? "—"}<span>%</span></div>
-      <div class="bench-hint">Temp ${g.temp_c != null ? g.temp_c + "°C" : "N/D"} · VRAM ${g.vram_usada_mb != null ? (Math.round(g.vram_usada_mb / 102.4) / 10).toFixed(1) + " GB" : "N/D"}</div>
+      <div class="bench-hint">Temp ${g.temp_c > 0 ? g.temp_c + "°C" : "N/D"} · VRAM ${g.vram_tot_mb > 0 ? (g.vram_tot_mb / 1024).toFixed(1) + " GB" : "N/D"}</div>
     </div>`).join("") || `<div class="empty">${IC("gpu")}<div>Nenhuma GPU detectada nas métricas.</div></div>`}</div>`;
   } catch (e) { if (liveBox) liveBox.innerHTML = ""; }
   // 2. Painel NVIDIA
@@ -1816,7 +1828,8 @@ function renderFps() {
     </div>`;
   }
 
-  const cards = FPS_METRICS.filter((m) => m.key !== "fps_avg").map((m) => {
+  // Oculta o card "0.1% low" quando não há lastro (poucos quadros → backend manda 0).
+  const cards = FPS_METRICS.filter((m) => m.key !== "fps_avg" && !(m.key === "low01" && !r.low01)).map((m) => {
     const v = r[m.key] || 0, bv = base ? (base[m.key] || 0) : null;
     let delta = "";
     if (bv != null && bv > 0) {
@@ -1987,14 +2000,14 @@ async function renderDriver() {
       ${nvBtn}</div>`;
   }).join("");
   const resid = d.residuos
-    ? `<button class="btnG drv-clean" data-drvclean="${escHtml(d.residuos.pasta)}"><span data-icon="broom"></span> Limpar resíduos (${d.residuos.mb} MB)</button>`
+    ? `<button class="btnG drv-clean" data-drvclean="${escHtml(d.residuos.pasta)}">${IC("broom")} Limpar resíduos (${d.residuos.mb} MB)</button>`
     : "";
   const temNvidia = gpus.some((g) => g.vendor === "NVIDIA"), temAmd = gpus.some((g) => g.vendor === "AMD");
   const guiaBtn = (temNvidia || temAmd)
-    ? `<button class="btnG drv-settings" id="btnGpuSettings"><span data-icon="bolt"></span> Ajustes do painel</button>` : "";
+    ? `<button class="btnG drv-settings" id="btnGpuSettings">${IC("bolt")} Ajustes do painel</button>` : "";
   box.innerHTML = `<div class="drv-card">
     <div class="drv-head">${IC("gpu")}<h3>Driver de GPU</h3>
-      <button class="btnG drv-guide" id="btnDrvGuide"><span data-icon="guide"></span> Guia: instalar limpo</button>${guiaBtn}${resid}</div>
+      <button class="btnG drv-guide" id="btnDrvGuide">${IC("guide")} Guia: instalar limpo</button>${guiaBtn}${resid}</div>
     ${rows}
     <div class="drv-note">Mostramos a versão e a data reais aqui, sem cobrar atualização. Pra buscar atualização de verdade (qualquer driver, não só GPU), use a <b>Auditoria de Drivers</b> em Manutenção → Ferramentas.</div>
   </div>`;
@@ -2085,7 +2098,7 @@ function renderDiag() {
   $("#diagList").innerHTML = (d.gargalos || []).map((g) => {
     const s = SEV[g.severidade] || SEV.info;
     let action = "";
-    if (g.acao && g.acao.startsWith("regra:")) action = `<button class="btnG diag-fix" data-diagfix="${g.acao.slice(6)}"><span data-icon="bolt"></span> Corrigir agora</button>`;
+    if (g.acao && g.acao.startsWith("regra:")) action = `<button class="btnG diag-fix" data-diagfix="${g.acao.slice(6)}">${IC("bolt")} Corrigir agora</button>`;
     else if (g.acao && g.acao.startsWith("pagina:")) { const pg = g.acao.slice(7), lbl = { limpeza: "Limpeza", inicializacao: "Inicialização", jogos: "Jogos", desempenho: "Desempenho" }[pg] || pg; action = `<button class="btnG diag-go" data-diagpage="${pg}">Abrir ${escHtml(lbl)}</button>`; }
     const corr = g.severidade === "bom" ? "" :
       `<div class="diag-fixbox">${IC(g.acao === "manual" ? "guide" : "ok")}<div><b>Como resolver:</b> ${escHtml(g.correcao)}</div></div>`;
