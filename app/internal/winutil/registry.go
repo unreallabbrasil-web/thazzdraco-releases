@@ -3,6 +3,8 @@
 package winutil
 
 import (
+	"fmt"
+
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -14,11 +16,13 @@ type RegSnapshot struct {
 	HkcuReal bool   `json:"hkcu_real,omitempty"`
 	Path     string `json:"path"`
 	Name     string `json:"name"`
-	Existed  bool   `json:"existed"`
-	Type     uint32 `json:"type,omitempty"`
-	DWord    uint32 `json:"dword,omitempty"`
-	QWord    uint64 `json:"qword,omitempty"`
-	Str      string `json:"str,omitempty"`
+	Existed  bool     `json:"existed"`
+	Type     uint32   `json:"type,omitempty"`
+	DWord    uint32   `json:"dword,omitempty"`
+	QWord    uint64   `json:"qword,omitempty"`
+	Str      string   `json:"str,omitempty"`
+	Multi    []string `json:"multi,omitempty"` // REG_MULTI_SZ
+	Bin      []byte   `json:"bin,omitempty"`   // REG_BINARY
 }
 
 // resolve mapeia (hive, sid, hkcuReal, path) para a chave-raiz e o subcaminho.
@@ -134,6 +138,12 @@ func SnapshotValue(hive, sid string, hkcuReal bool, path, name string) RegSnapsh
 	case registry.SZ, registry.EXPAND_SZ:
 		s, _, _ := k.GetStringValue(name)
 		snap.Str = s
+	case registry.MULTI_SZ:
+		ss, _, _ := k.GetStringsValue(name)
+		snap.Multi = ss
+	case registry.BINARY:
+		b, _, _ := k.GetBinaryValue(name)
+		snap.Bin = b
 	}
 	return snap
 }
@@ -164,8 +174,14 @@ func RestoreSnapshot(s RegSnapshot) error {
 		return k.SetStringValue(s.Name, s.Str)
 	case registry.EXPAND_SZ:
 		return k.SetExpandStringValue(s.Name, s.Str)
+	case registry.MULTI_SZ:
+		return k.SetStringsValue(s.Name, s.Multi)
+	case registry.BINARY:
+		return k.SetBinaryValue(s.Name, s.Bin)
 	}
-	return nil
+	// Tipo não suportado (RESOURCE_LIST etc.): sinaliza em vez de fingir sucesso —
+	// o undo mantém o item no histórico para nova tentativa em vez de perdê-lo.
+	return fmt.Errorf("tipo de registro %d não suportado no undo (%s)", s.Type, s.Name)
 }
 
 // ---- Escrita (apply) ---------------------------------------------------------

@@ -338,7 +338,10 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 				undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setactive", Scheme: winutil.ActiveScheme()})
 			} else if len(cmd) >= 5 && cmd[0] == "/setacvalueindex" {
 				old, had := winutil.PowercfgAcValue(cmd[2], cmd[3])
-				undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setacvalue", Sub: cmd[2], Setting: cmd[3], OldValue: old, HadValue: had})
+				// Guarda o GUID do esquema ATIVO no momento da escrita: o undo grava
+				// nele, não no "SCHEME_CURRENT" do momento do desfazer (que pode ser
+				// outro plano — corrompia um esquema não tocado).
+				undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setacvalue", Scheme: winutil.ActiveScheme(), Sub: cmd[2], Setting: cmd[3], OldValue: old, HadValue: had})
 			}
 		}
 		for _, cmd := range a.Comandos {
@@ -433,9 +436,17 @@ func runCleanup(dirs []string) float64 {
 // (ex.: rodou sem elevação e a escrita HKLM foi negada). O chamador usa isso para
 // NÃO remover do histórico o que não foi de fato revertido — senão a UI mostraria
 // "desfeito" com o sistema ainda alterado e a info de undo perdida para sempre.
-func revertRule(ru RuleUndo) error {
+// revertRule reverte uma regra. `skip` (pode ser nil) contém chaves de registro
+// tocadas por lotes MAIS NOVOS: essas não são revertidas agora (o lote novo precisa
+// ser desfeito primeiro, senão restauraríamos um valor intermediário) — a regra fica
+// no histórico para nova tentativa.
+func revertRule(ru RuleUndo, skip map[string]bool) error {
 	var errs []string
 	for _, snap := range ru.Regs {
+		if skip != nil && skip[regKey(snap)] {
+			errs = append(errs, "reg "+snap.Name+": desfaça primeiro o lote mais novo que alterou este valor")
+			continue
+		}
 		if err := winutil.RestoreSnapshot(snap); err != nil {
 			errs = append(errs, "reg "+snap.Name+": "+err.Error())
 		}
@@ -453,10 +464,17 @@ func revertRule(ru RuleUndo) error {
 		switch p.Kind {
 		case "setacvalue":
 			if p.HadValue {
-				if _, err := winutil.RunPowercfg("/setacvalueindex", "SCHEME_CURRENT", p.Sub, p.Setting, strconv.FormatInt(p.OldValue, 10)); err != nil {
+				scheme := p.Scheme
+				if scheme == "" {
+					scheme = "SCHEME_CURRENT"
+				}
+				if _, err := winutil.RunPowercfg("/setacvalueindex", scheme, p.Sub, p.Setting, strconv.FormatInt(p.OldValue, 10)); err != nil {
 					errs = append(errs, "powercfg "+p.Setting+": "+err.Error())
 				}
-				winutil.RunPowercfg("/setactive", "SCHEME_CURRENT")
+				// Só re-aplica se esse esquema for o ativo agora — não troca o plano do usuário.
+				if scheme == "SCHEME_CURRENT" || scheme == winutil.ActiveScheme() {
+					winutil.RunPowercfg("/setactive", scheme)
+				}
 			}
 		case "setactive":
 			if p.Scheme != "" {
@@ -474,6 +492,28 @@ func revertRule(ru RuleUndo) error {
 	return nil
 }
 
+// regKey identifica um valor de registro (para detectar sobreposição entre lotes).
+func regKey(s winutil.RegSnapshot) string {
+	return s.Hive + "|" + s.Sid + "|" + s.Path + "|" + s.Name
+}
+
+// newerRegKeys coleta as chaves de registro tocadas por um conjunto de lotes (os
+// mais novos), para a disciplina LIFO do undo.
+func newerRegKeys(batches []BatchRecord) map[string]bool {
+	m := map[string]bool{}
+	for _, b := range batches {
+		for _, ru := range b.Rules {
+			for _, s := range ru.Regs {
+				m[regKey(s)] = true
+			}
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
 // UndoBatch desfaz um lote inteiro e o remove do historico.
 func UndoBatch(batchID string) (int, error) {
 	histMu.Lock()
@@ -489,11 +529,12 @@ func UndoBatch(batchID string) (int, error) {
 	if idx < 0 {
 		return 0, fmt.Errorf("lote nao encontrado: %s", batchID)
 	}
+	skip := newerRegKeys(h[idx+1:]) // valores tocados por lotes mais novos: LIFO
 	var kept []RuleUndo
 	var falhas []string
 	reverted := 0
 	for i := len(h[idx].Rules) - 1; i >= 0; i-- {
-		if err := revertRule(h[idx].Rules[i]); err != nil {
+		if err := revertRule(h[idx].Rules[i], skip); err != nil {
 			kept = append(kept, h[idx].Rules[i]) // mantém no histórico p/ nova tentativa
 			falhas = append(falhas, h[idx].Rules[i].RuleID)
 		} else {
@@ -520,8 +561,8 @@ func UndoRule(ruleID string) error {
 	for bi := len(h) - 1; bi >= 0; bi-- {
 		for ri := len(h[bi].Rules) - 1; ri >= 0; ri-- {
 			if h[bi].Rules[ri].RuleID == ruleID {
-				if err := revertRule(h[bi].Rules[ri]); err != nil {
-					return err // não remove do histórico: reversão falhou
+				if err := revertRule(h[bi].Rules[ri], newerRegKeys(h[bi+1:])); err != nil {
+					return err // não remove do histórico: reversão falhou (ou lote mais novo pendente)
 				}
 				h[bi].Rules = append(h[bi].Rules[:ri], h[bi].Rules[ri+1:]...)
 				if len(h[bi].Rules) == 0 {
@@ -544,10 +585,12 @@ func UndoAll() int {
 	h := loadHistoryLocked()
 	count := 0
 	var restante []BatchRecord
-	for bi := 0; bi < len(h); bi++ {
+	// Do MAIS NOVO ao mais antigo (LIFO): desfazer na ordem inversa garante que um
+	// valor tocado por vários lotes volte ao estado original correto.
+	for bi := len(h) - 1; bi >= 0; bi-- {
 		var kept []RuleUndo
 		for ri := len(h[bi].Rules) - 1; ri >= 0; ri-- {
-			if err := revertRule(h[bi].Rules[ri]); err != nil {
+			if err := revertRule(h[bi].Rules[ri], nil); err != nil {
 				kept = append(kept, h[bi].Rules[ri])
 			} else {
 				count++
