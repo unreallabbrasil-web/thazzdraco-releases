@@ -40,15 +40,27 @@ func NvidiaPanel() map[string]any {
 		return map[string]any{"disponivel": false, "erro": "nvidia-smi não respondeu"}
 	}
 
-	fields := strings.SplitN(strings.TrimSpace(out), ",", 11)
+	// Só a PRIMEIRA linha (GPU primária). Com 2+ placas, o nvidia-smi emite uma
+	// linha CSV por GPU; usar a saída inteira misturava o campo 9 de uma linha com
+	// o nome da próxima e zerava o clock.
+	first := strings.TrimSpace(out)
+	if i := strings.IndexAny(first, "\r\n"); i >= 0 {
+		first = strings.TrimSpace(first[:i])
+	}
+	fields := strings.SplitN(first, ",", 11)
 	get := func(i int) string {
 		if i < len(fields) {
 			return strings.TrimSpace(fields[i])
 		}
 		return ""
 	}
+	// parseI devolve -1 quando o campo não é numérico (ex.: "[N/A]" em power.draw de
+	// GPUs mobile) — -1 = N/A honesto, em vez de fingir 0 W / 0 °C.
 	parseI := func(i int) int {
-		v, _ := strconv.Atoi(get(i))
+		v, err := strconv.Atoi(get(i))
+		if err != nil {
+			return -1
+		}
 		return v
 	}
 
@@ -107,21 +119,22 @@ func NvidiaSetPower(watts int) map[string]any {
 	return map[string]any{"ok": true, "watts": watts, "mensagem": "Limite de energia configurado para " + strconv.Itoa(watts) + " W."}
 }
 
-// NvidiaResetPower restaura o limite de potência ao padrão do modelo.
+// NvidiaResetPower restaura o limite de potência ao padrão do modelo. O nvidia-smi
+// NÃO tem flag de "reset" de power limit (--reset-power-limit/-rpl não existem);
+// o reset correto é reescrever o limite com o valor padrão da placa (-pl <default>),
+// que o próprio NvidiaPanel já lê em power.default_limit.
 func NvidiaResetPower() map[string]any {
 	smi := findNvidiaSmi()
 	if smi == "" {
 		return map[string]any{"ok": false, "erro": "nvidia-smi não encontrado"}
 	}
-	// -pm 1 = Persistence Mode on; então --power-limit sem valor = restaura padrão
-	// nvidia-smi --reset-gpu-clocks / --reset-power-limit
-	_, err := runCapture(smi, "--reset-power-limit")
-	if err != nil {
-		// fallback: tenta via flag alternativa
-		_, err2 := runCapture(smi, "-rpl")
-		if err2 != nil {
-			return map[string]any{"ok": false, "erro": "não consegui resetar o power limit"}
-		}
+	panel := NvidiaPanel()
+	def, ok := panel["power_default_w"].(int)
+	if !ok || def <= 0 {
+		return map[string]any{"ok": false, "erro": "não foi possível obter o power limit padrão da placa"}
 	}
-	return map[string]any{"ok": true, "mensagem": "Power limit restaurado ao padrão do modelo."}
+	if _, err := runCapture(smi, "-pl", strconv.Itoa(def)); err != nil {
+		return map[string]any{"ok": false, "erro": "não consegui resetar o power limit (precisa de administrador)"}
+	}
+	return map[string]any{"ok": true, "watts": def, "mensagem": "Power limit restaurado ao padrão do modelo (" + strconv.Itoa(def) + " W)."}
 }

@@ -3,12 +3,53 @@
 package winutil
 
 import (
+	"encoding/binary"
 	"strings"
 	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
+
+// adapterVRAMBytes lê a capacidade REAL de VRAM (bytes) do adaptador cujo DriverDesc
+// casa com `nameContains`, a partir do registro do driver de vídeo. É o valor
+// honesto de capacidade: o AdapterRAM do WMI satura em 4 GB (uint32) e o "Total" do
+// PDH é memória comprometida (somada entre adaptadores), não a capacidade física.
+// Retorna 0 se não encontrar.
+func adapterVRAMBytes(nameContains string) uint64 {
+	const base = `SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}`
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, base, registry.ENUMERATE_SUB_KEYS)
+	if err != nil {
+		return 0
+	}
+	defer k.Close()
+	subs, _ := k.ReadSubKeyNames(-1)
+	want := strings.ToLower(strings.TrimSpace(nameContains))
+	for _, sub := range subs {
+		sk, err := registry.OpenKey(registry.LOCAL_MACHINE, base+`\`+sub, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		desc, _, _ := sk.GetStringValue("DriverDesc")
+		dl := strings.ToLower(desc)
+		if want != "" && dl != "" && !strings.Contains(dl, want) && !strings.Contains(want, dl) {
+			sk.Close()
+			continue
+		}
+		// qwMemorySize pode vir como QWORD ou como BINARY (8 bytes little-endian).
+		if v, _, err := sk.GetIntegerValue("HardwareInformation.qwMemorySize"); err == nil && v > 0 {
+			sk.Close()
+			return v
+		}
+		if b, _, err := sk.GetBinaryValue("HardwareInformation.qwMemorySize"); err == nil && len(b) >= 8 {
+			sk.Close()
+			return binary.LittleEndian.Uint64(b[:8])
+		}
+		sk.Close()
+	}
+	return 0
+}
 
 // GPUInfo: dados de uma GPU. Campos -1 = N/A (nao lido de sensor real).
 type GPUInfo struct {
@@ -226,10 +267,11 @@ func GPUs() []GPUInfo {
 			g.UsoPct = uniUso // uso 3D real (PDH) — funciona em AMD/Intel
 			g.Fonte = "PDH"
 		}
-		// F8: VRAM via PDH — funciona para AMD e Intel (WDDM)
-		if vramUso, vramTot, vok := VramMB(); vok {
-			g.VramUso = vramUso
-			g.VramTot = vramTot
+		// VRAM: capacidade REAL via registro do driver (por adaptador). O uso fica
+		// N/A — o "used" do PDH é somado entre todas as GPUs, então seria enganoso
+		// atribuí-lo a uma placa específica (melhor N/A honesto que número errado).
+		if bytes := adapterVRAMBytes(name); bytes > 0 {
+			g.VramTot = int(bytes / (1 << 20))
 		}
 		if g.TempC < 0 {
 			g.Nota = "Temperatura: requer sensor do fabricante (N/A nesta marca)."
