@@ -4,6 +4,7 @@ package winutil
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -190,7 +191,16 @@ func (m *RepairManager) stream(name string, args ...string) {
 		}
 		m.appendLog(chunk)
 	}
-	cmd.Wait()
+	// Surface o resultado real: um exit code != 0 (ex.: DISM 0x800f081f "source não
+	// encontrada", SFC "não conseguiu reparar") era engolido e a etapa terminava como
+	// se tivesse dado certo. Agora o veredito aparece no log do cliente.
+	if err := cmd.Wait(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			m.appendLog(fmt.Sprintf("⚠ %s terminou com código %d — a etapa NÃO concluiu com sucesso.", name, ee.ExitCode()))
+		} else {
+			m.appendLog("⚠ " + name + " falhou: " + err.Error())
+		}
+	}
 }
 
 // windowsUpdateReset para os servicos, renomeia os caches e reinicia (padrao

@@ -5,6 +5,7 @@ package winutil
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,12 +87,20 @@ func HostsList() ([]HostEntry, error) {
 
 // HostsAdd adiciona uma nova entrada ao arquivo hosts.
 func HostsAdd(ip, host, comment string) error {
-	if !isIPLike(ip) {
+	ip = strings.TrimSpace(ip)
+	// Validação REAL do IP (net.ParseIP) — o antigo isIPLike aceitava "1.1.1.1 evil"
+	// e injetava um segundo mapeamento na linha.
+	if net.ParseIP(ip) == nil {
 		return fmt.Errorf("IP inválido: %s", ip)
 	}
 	host = strings.TrimSpace(host)
-	if host == "" || strings.ContainsAny(host, " \t\r\n") {
+	if host == "" || strings.ContainsAny(host, " \t\r\n#") {
 		return fmt.Errorf("hostname inválido")
+	}
+	// Comentário não pode conter quebra de linha (injetaria linhas arbitrárias no
+	// hosts) nem '#' (fecharia/abriria comentário).
+	if strings.ContainsAny(comment, "\r\n#") {
+		return fmt.Errorf("comentário inválido")
 	}
 	// verificar duplicata
 	existing, _ := HostsList()
@@ -160,6 +169,10 @@ func hostsRewrite(transform func(string) (string, bool), appendLines ...string) 
 	if err != nil {
 		return err
 	}
+	// Backup antes de qualquer alteração — o hosts pode conter entradas de licença/
+	// software de terceiros; um erro deve ser restaurável (copie o .bak de volta).
+	_ = os.WriteFile(p+".thazzdraco.bak", data, 0644)
+
 	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
 	lines := strings.Split(normalized, "\n")
 	var out []string
@@ -170,7 +183,12 @@ func hostsRewrite(transform func(string) (string, bool), appendLines ...string) 
 		}
 	}
 	out = append(out, appendLines...)
-	return os.WriteFile(p, []byte(strings.Join(out, "\r\n")), 0644)
+	// Escrita atômica (tmp + rename): um crash no meio não deixa o hosts truncado.
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strings.Join(out, "\r\n")), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
 }
 
 func isIPLike(s string) bool {

@@ -348,6 +348,18 @@ func wuaInstallDriverUpdates(ids []string) (rebootRequired bool, err error) {
 	instResult := instResultRaw.ToIDispatch()
 	defer instResult.Release()
 
+	// ResultCode agregado (OperationResultCode): 2=ok, 3=ok com erros, 4=falhou,
+	// 5=abortado. O Install() retorna S_OK mesmo com updates que falharam — sem
+	// checar isto, um driver que NÃO instalou era reportado como "concluído".
+	if rc, err := oleutil.GetProperty(instResult, "ResultCode"); err == nil {
+		switch int(rc.Val) {
+		case 4:
+			return false, fmt.Errorf("a instalação do driver falhou (o Windows Update recusou; tente pelo próprio Windows Update)")
+		case 5:
+			return false, fmt.Errorf("a instalação do driver foi abortada")
+		}
+	}
+
 	reboot := false
 	if v, err := oleutil.GetProperty(instResult, "RebootRequired"); err == nil {
 		if b, ok := v.Value().(bool); ok {

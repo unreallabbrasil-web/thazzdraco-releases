@@ -576,7 +576,7 @@ func (s *Server) handleRepairStatus(w http.ResponseWriter, _ *http.Request) {
 
 // handleBloatList lista os apps de bloatware removiveis (catalogo seguro).
 func (s *Server) handleBloatList(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, winutil.ListBloat())
+	writeJSON(w, 200, winutil.ListBloat(winutil.RealUserSid()))
 }
 
 // handleDeepScan calcula o tamanho de cada categoria da limpeza profunda.
@@ -649,7 +649,7 @@ func (s *Server) handleBloatRemove(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	writeJSON(w, 200, winutil.RemoveBloat(req.Pacotes))
+	writeJSON(w, 200, winutil.RemoveBloat(winutil.RealUserSid(), req.Pacotes))
 }
 
 type driverCleanReq struct {
