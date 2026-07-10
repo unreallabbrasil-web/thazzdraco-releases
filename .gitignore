@@ -13,3 +13,13 @@ app/edge-profile/
 # Temporários
 *.tmp
 *.log
+
+# Artefatos pesados e dados de runtime da v3.0 (não versionar)
+art/*.png
+assets/*.png
+estado.json
+metricas.json
+
+# Backups gerados em runtime
+*.thazzdraco.bak
+*.corrupt.bak

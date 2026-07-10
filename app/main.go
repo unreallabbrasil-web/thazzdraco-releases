@@ -14,11 +14,21 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"thazzdraco/internal/engine"
 	"thazzdraco/internal/server"
 	"thazzdraco/internal/winutil"
 )
+
+// messageBox mostra um alerta nativo. Sem console (build -H windowsgui), um
+// fmt.Println morre invisível — o usuário via "nada aconteceu". Isto dá um motivo.
+func messageBox(text string) {
+	mb := syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
+	t, _ := syscall.UTF16PtrFromString(text)
+	cap, _ := syscall.UTF16PtrFromString("ThazzDraco Optimizer")
+	mb.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(cap)), 0x10) // MB_ICONERROR
+}
 
 //go:embed VERSION
 var _versionRaw string
@@ -49,7 +59,7 @@ func main() {
 	// Modo app: precisa de admin para escrever HKLM/servicos/powercfg.
 	if !*headless && !winutil.IsAdmin() {
 		if err := winutil.RelaunchElevated(); err != nil {
-			fmt.Println("Este programa precisa ser executado como administrador.")
+			messageBox("Este programa precisa ser executado como administrador, mas a elevação foi recusada ou cancelada.")
 		}
 		return
 	}
@@ -155,5 +165,8 @@ func dumpJSON(v any) {
 
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "erro:", err)
+	// Build sem console: o stderr some. Mostra o motivo numa caixa (ex.: a porta
+	// local bloqueada por firewall/loopback) em vez de fechar sem explicação.
+	messageBox("Não foi possível iniciar o ThazzDraco:\n\n" + err.Error())
 	os.Exit(1)
 }
