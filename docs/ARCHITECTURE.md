@@ -77,7 +77,7 @@ web e as regras, sobe um servidor HTTP local e abre uma janela do navegador em m
 
 ## 4. `internal/engine` — motor declarativo
 
-- **`model.go`** — structs das regras + `go:embed` de `assets/rules.json` (43 regras) e
+- **`model.go`** — structs das regras + `go:embed` de `assets/rules.json` (61 regras) e
   `assets/presets.json`.
 - **`gate.go`** — avaliação de `hardware_gate` (campos do perfil, ops `==`/`<`/`>=`/`contem`…).
 - **`detect.go`** — detecção por tipo: `registry`, `registry-foreach`, `powercfg`,

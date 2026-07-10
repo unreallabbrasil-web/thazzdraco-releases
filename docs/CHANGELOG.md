@@ -4,6 +4,48 @@ Histórico de versões do ThazzDraco Optimizer. Formato baseado em *Keep a Chang
 
 ---
 
+## [Não lançado] — Checkup geral: correções críticas + altas (jul/2026)
+
+Auditoria profunda de todo o app (motor, escritas/leituras no Windows, servidor HTTP, FPS, UI, build).
+Relatório completo em [`CHECKUP-2026-07.md`](../CHECKUP-2026-07.md).
+
+**Segurança (servidor roda elevado):**
+- Token de sessão exigido em todo `/api/` (cookie `HttpOnly`+`SameSite` ou header `X-TZ-Token`) → fecha
+  escalonamento de privilégio local; allowlist de `Host` loopback → fecha DNS rebinding.
+- Updater exige HTTPS + host do GitHub (inclusive nos redirects) antes de baixar/aplicar.
+- Allowlist de serviços em `/api/servicos/parar`; timeouts no `http.Server`; update espera operações em
+  andamento antes do self-replace.
+
+**Reversibilidade / undo:** snapshot preservado em falha parcial do apply; histórico gravado
+incrementalmente (write-ahead); undo honesto (só remove do histórico o que reverteu); `power-max` reporta
+falha real; consentimento respeitado em preset custom.
+
+**Dado real:** ping de host sem resposta reporta 100% de perda (não fingir 0%); VRAM lida do registro do
+driver (não do WMI uint32/PDH); SMBIOS `0xFFFF` deixa de virar 65535 MHz; falha de seek vira "Desconhecido"
+(não "HDD"); `nvidia-smi` `[N/A]`→-1 e parse correto com 2 GPUs; SFC UTF-16 decodificado.
+
+**FPS:** corrige vazamento de callback que derrubava o app após ~2000 polls; para de descartar
+congelamentos reais >1s (só o warm-up).
+
+**UI:** FPS não trava mais o botão ao trocar de aba; polls de driver/update não ficam órfãos; fechar o
+painel de update não cancela o download.
+
+**Robustez/build:** watchdog no Windows Update Agent; backup da rede antes do `netsh int ip reset`;
+`resgen.py` lê a versão do `VERSION` (era fixo 4.0.0.0); CI em Go 1.26 + roda `resgen.py`; `lancar.ps1`
+não sobrescreve mais o entregável. Regra obsoleta `win.modern-standby-off` removida (62 → 61 regras).
+
+## [4.1.0 – 4.4.3] — resumo (jun–jul/2026)
+
+Detalhe por commit no `git log`. Marcos:
+- **4.4.0–4.4.3** — atualização real de drivers via Windows Update Agent (busca/instalação por item);
+  iterações de UX na lista de drivers (feedback: 100% automático).
+- **4.3.0–4.3.5** — auto-update in-app (baixa, substitui o exe e reinicia; troca robusta com rollback);
+  unificação de Debloat/Limpeza profunda/Browser Cleaner; dois checkups de polish (19 + 16 correções).
+- **4.2.0** — painel de update com auto-check, chip "NOVA VERSÃO", notas de release.
+- **4.1.0** — monitor de temperatura ao vivo + comparador antes × depois.
+
+---
+
 ## [4.0.0] — Fix: adaptadores virtuais (Parsec/TeamViewer) poluíam o Desempenho
 
 Sintoma do usuário: a tela "Desempenho ao vivo" mostrava um **"Parsec Virtual Display Adapter"** como

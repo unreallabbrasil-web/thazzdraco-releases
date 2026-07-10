@@ -1,7 +1,7 @@
 # Catálogo de Otimizações
 
 > **Atualização v4.0 (jun/2026):** as otimizações hoje vivem como **regras declarativas** em
-> `app/internal/engine/assets/rules.json` (**43 regras**), aplicadas pelo motor Go (não mais pelo
+> `app/internal/engine/assets/rules.json` (**61 regras**), aplicadas pelo motor Go (não mais pelo
 > `FPS_Optimizer_Script.ps1`, aposentado). O contrato está em [RULES-SCHEMA.md](RULES-SCHEMA.md). O
 > conteúdo abaixo segue válido como **base de conhecimento** das otimizações.
 >

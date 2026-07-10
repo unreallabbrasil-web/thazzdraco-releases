@@ -12,7 +12,7 @@ TeamViewer) e otimizar máquinas de clientes com segurança.
 ## ✨ O que ele faz
 
 - 🐉 **Núcleo / Diagnóstico (Portal)** — varredura cinematográfica com **Boost Score** (0–100).
-- ⚡ **Otimizações** — 43 regras declarativas (registro, serviços, powercfg) com **toggle on/off**
+- ⚡ **Otimizações** — 61 regras declarativas (registro, serviços, powercfg) com **toggle on/off**
   por módulo, organizadas por categoria, com **selo de segurança** (seguro/médio/avançado) e
   **detalhes técnicos** (a chave/valor exata que cada uma altera).
 - 🎮 **Otimização por jogo** — detecta jogos do Steam/Epic e aplica por jogo: **FSO off**,
@@ -72,7 +72,7 @@ cd "E:\CLAUDE AI\OPTM\app"
 ```
 
 O `build.ps1` roda `resgen.py` (gera `resource.syso` com ícone + manifesto, sem ferramenta externa)
-e `go build -ldflags="-H windowsgui -s -w"`. Saída: **`dist/ThazzDraco.exe`** (~7,9 MB).
+e `go build -ldflags="-H windowsgui -s -w"`. Saída: **`dist/ThazzDraco.exe`** (~8,8 MB).
 
 Modos de linha de comando (debug): `tz.exe -profile` (perfil de hardware), `tz.exe -scan`
 (varredura em JSON), `tz.exe -headless -port N` (sobe o servidor sem janela/admin, para testes).
@@ -108,7 +108,7 @@ Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Histórico completo em
 |---|---|
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | Arquitetura Go v4.0 (winutil / engine / server / web) |
 | [ROADMAP](docs/ROADMAP.md) | Status das fases (o que está pronto / pendente) |
-| [OPTIMIZATIONS](docs/OPTIMIZATIONS.md) | Catálogo das 43 regras + tweaks por jogo |
+| [OPTIMIZATIONS](docs/OPTIMIZATIONS.md) | Catálogo das 61 regras + tweaks por jogo |
 | [RULES-SCHEMA](docs/RULES-SCHEMA.md) | Contrato das regras declarativas |
 | [SCAN-ENGINE](docs/SCAN-ENGINE.md) | Como a varredura/detecção funciona |
 | [GUIA-OTIMIZACAO-GAMING](docs/GUIA-OTIMIZACAO-GAMING.md) | Guia mestre (catálogo completo + selos de segurança) |
@@ -118,7 +118,7 @@ Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Histórico completo em
 
 ---
 
-## 📌 Status (v4.0 — jun/2026)
+## 📌 Status (v4.4.3 — jul/2026)
 
 **Funcional e validado** com dados reais (perfil, varredura, API, UI, GPU NVML, detecção de jogos,
 benchmark, **medidor de FPS**). **Objetivo A** (ganho de FPS comprovável) e **Objetivo B** (limpar/

@@ -1,7 +1,7 @@
 # Esquema de Regras (Rules Schema)
 
 > **Status v4.0:** este contrato está **em produção**. As regras vivem em
-> `app/internal/engine/assets/rules.json` (**43 regras**, embutidas no `.exe` via `go:embed`) e são
+> `app/internal/engine/assets/rules.json` (**61 regras**, embutidas no `.exe` via `go:embed`) e são
 > interpretadas pelo motor Go (`internal/engine/model.go`, `detect.go`, `apply.go`). Tipos de
 > detecção/ação suportados: `registry`, `registry-foreach`, `powercfg`, `powercfg-setting`,
 > `service`, `cleanup`/`cleanup-size`, `profile-compara`, `dns-check`. O contrato abaixo continua

@@ -32,7 +32,7 @@ Perfil de hardware nativo (SMBIOS, energia, display, disco SSD/HDD, DNS), detec�
 (notebook/desktop, SSD do sistema), varredura de **todas** as regras → `ScanResult`.
 
 ### Fase 2 — Motor de recomendação (✅ concluída)
-Regras **declarativas** (`rules.json`, 43 regras), gating por hardware/uso, score calculado por uma
+Regras **declarativas** (`rules.json`, 61 regras), gating por hardware/uso, score calculado por uma
 fonte única (Go). Detalhes técnicos por regra.
 
 ### Fase 3 — Aplicação segura + restauração (✅ concluída)

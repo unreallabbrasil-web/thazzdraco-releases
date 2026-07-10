@@ -4,7 +4,7 @@ Gera resource.syso (COFF amd64) com RT_ICON + RT_GROUP_ICON + RT_MANIFEST,
 para o linker do Go embutir o icone do dragao e o manifesto (requireAdministrator).
 Self-contained: nao depende de windres/rc/goversioninfo. Tecnica equivalente ao rsrc.
 """
-import struct, sys
+import struct, sys, re
 
 ICO = "icon.ico"
 MANIFEST = "app.manifest"
@@ -17,17 +17,31 @@ LANG = 0x0409
 # Metadados de versao/empresa/produto. Um .exe SEM isso tem a aba "Detalhes" em
 # branco, o que e um sinal classico de software suspeito para a heuristica de
 # antivirus. Preencher reduz o "score" de suspeita (binario com identidade).
-VER_FILE = (4, 0, 0, 0)
-VER_PROD = (4, 0, 0, 0)
+# A versao vem do arquivo VERSION (fonte unica) — antes ficava fixa em 4.0.0.0,
+# entao todo exe mostrava 4.0.0.0 na aba Detalhes independente da versao real.
+def _read_version():
+    try:
+        with open("VERSION", encoding="utf-8") as f:
+            s = f.read().strip()
+    except OSError:
+        s = "0.0.0"
+    parts = [int(x) for x in re.findall(r"\d+", s)][:3]
+    while len(parts) < 3:
+        parts.append(0)
+    return (parts[0], parts[1], parts[2], 0)
+
+VER_FILE = _read_version()
+VER_PROD = VER_FILE
+_VER_STR = "%d.%d.%d.%d" % VER_FILE
 VER_STRINGS = [
     ("CompanyName",      "ThazZDraco FPS Otimizacao"),
     ("FileDescription",  "ThazzDraco Optimizer - Otimizador de PC para jogos"),
-    ("FileVersion",      "4.0.0.0"),
+    ("FileVersion",      _VER_STR),
     ("InternalName",     "ThazzDraco"),
     ("LegalCopyright",   "(c) 2026 ThazZDraco FPS Otimizacao"),
     ("OriginalFilename", "ThazzDraco.exe"),
     ("ProductName",      "ThazzDraco Optimizer"),
-    ("ProductVersion",   "4.0.0.0"),
+    ("ProductVersion",   _VER_STR),
 ]
 
 
