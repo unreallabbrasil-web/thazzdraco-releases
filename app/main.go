@@ -14,11 +14,21 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"thazzdraco/internal/engine"
 	"thazzdraco/internal/server"
 	"thazzdraco/internal/winutil"
 )
+
+// messageBox mostra um alerta nativo. Sem console (build -H windowsgui), um
+// fmt.Println morre invisível — o usuário via "nada aconteceu". Isto dá um motivo.
+func messageBox(text string) {
+	mb := syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
+	t, _ := syscall.UTF16PtrFromString(text)
+	cap, _ := syscall.UTF16PtrFromString("ThazzDraco Optimizer")
+	mb.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(cap)), 0x10) // MB_ICONERROR
+}
 
 //go:embed VERSION
 var _versionRaw string
@@ -34,6 +44,8 @@ func main() {
 	scanMode := flag.Bool("scan", false, "roda a varredura e imprime JSON e sai")
 	headless := flag.Bool("headless", false, "sobe o servidor sem abrir janela nem elevar (teste)")
 	port := flag.Int("port", 0, "porta fixa (0 = efemera)")
+	// As ferramentas de publicacao (gerar chaves, assinar release) vivem em
+	// ./cmd/assinar — fora do produto, que embute manifesto de admin.
 	flag.Parse()
 
 	switch {
@@ -49,7 +61,7 @@ func main() {
 	// Modo app: precisa de admin para escrever HKLM/servicos/powercfg.
 	if !*headless && !winutil.IsAdmin() {
 		if err := winutil.RelaunchElevated(); err != nil {
-			fmt.Println("Este programa precisa ser executado como administrador.")
+			messageBox("Este programa precisa ser executado como administrador, mas a elevação foi recusada ou cancelada.")
 		}
 		return
 	}
@@ -72,11 +84,20 @@ func main() {
 	}
 	url := fmt.Sprintf("http://%s/", ln.Addr().String())
 
-	httpSrv := &http.Server{Handler: srv.Handler()}
+	httpSrv := &http.Server{
+		Handler: srv.Handler(),
+		// ReadHeaderTimeout corta conexões que abrem o socket e não mandam headers
+		// (Slowloris local). NÃO definimos ReadTimeout/WriteTimeout: matariam o SSE
+		// de heartbeat (conexão longa) e respostas demoradas (backup/benchmark).
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go httpSrv.Serve(ln)
 
 	if *headless {
 		fmt.Println("ThazzDraco headless em", url)
+		fmt.Println("token de sessao:", srv.Token())
+		fmt.Println("teste: curl -H \"X-TZ-Token: <token>\" " + url + "api/escanear")
 		select {} // mantem rodando para testes manuais
 	}
 
@@ -146,5 +167,8 @@ func dumpJSON(v any) {
 
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "erro:", err)
+	// Build sem console: o stderr some. Mostra o motivo numa caixa (ex.: a porta
+	// local bloqueada por firewall/loopback) em vez de fechar sem explicação.
+	messageBox("Não foi possível iniciar o ThazzDraco:\n\n" + err.Error())
 	os.Exit(1)
 }

@@ -67,14 +67,33 @@ func ensurePresentMon() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "ThazzDraco")
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		if c, err := os.UserCacheDir(); err == nil {
+			base = c
+		} else {
+			base = os.TempDir() // nunca deixa cair num caminho relativo ao cwd
+		}
+	}
+	dir := filepath.Join(base, "ThazzDraco")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	p := filepath.Join(dir, "PresentMon.exe")
 	if st, err := os.Stat(p); err != nil || st.Size() != int64(len(bin)) {
-		if err := os.WriteFile(p, bin, 0o755); err != nil {
+		// Extração atômica (tmp por-PID + rename): duas instâncias extraindo ao
+		// mesmo tempo não colidem, e nunca fica um exe meio-escrito.
+		tmp := fmt.Sprintf("%s.%d.tmp", p, os.Getpid())
+		if err := os.WriteFile(tmp, bin, 0o755); err != nil {
 			return "", err
+		}
+		if err := os.Rename(tmp, p); err != nil {
+			os.Remove(tmp)
+			// se outra instância (ou uma captura em curso) já pôs o exe certo no
+			// lugar, seguimos com ele; senão, propaga o erro.
+			if st, e2 := os.Stat(p); e2 != nil || st.Size() != int64(len(bin)) {
+				return "", err
+			}
 		}
 		// licenca MIT do PresentMon junto ao binario (conformidade Intel/MIT)
 		os.WriteFile(filepath.Join(dir, "PresentMon-LICENSE.txt"), presentMonLicense, 0o644)
@@ -145,7 +164,9 @@ func (m *Manager) run(proc string, seconds int) {
 		m.fail("nao consegui preparar o PresentMon: " + err.Error())
 		return
 	}
-	csvPath := filepath.Join(os.TempDir(), "thazzdraco_fps.csv")
+	// CSV único por PID: duas instâncias do app medindo ao mesmo tempo não escrevem
+	// mais no mesmo arquivo (nem o defer os.Remove de uma apaga o da outra).
+	csvPath := filepath.Join(os.TempDir(), fmt.Sprintf("thazzdraco_fps_%d.csv", os.Getpid()))
 	os.Remove(csvPath)
 	defer os.Remove(csvPath)
 
@@ -166,7 +187,7 @@ func (m *Manager) run(proc string, seconds int) {
 		"-session_name", sessionName,
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
-	out, _ := cmd.CombinedOutput()
+	out, runErr := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		m.fail("o medidor de FPS demorou demais e foi interrompido. Tente de novo com o jogo aberto.")
 		return
@@ -180,6 +201,12 @@ func (m *Manager) run(proc string, seconds int) {
 			return
 		}
 		msg := perr.Error()
+		// Surface o erro do processo (ex.: exe em quarentena pelo AV = "%1 is not a
+		// valid Win32 application" / "Access is denied") — antes era engolido e o
+		// usuário só via "não gerou dados".
+		if runErr != nil {
+			msg += " · " + runErr.Error()
+		}
 		if s := strings.TrimSpace(string(out)); s != "" {
 			msg += " · " + lastLine(s)
 		}
@@ -313,6 +340,63 @@ var shellExes = map[string]bool{
 	"shellexperiencehost.exe": true, "msedge.exe": true, "msedgewebview2.exe": true,
 }
 
+// O callback do EnumWindows é criado UMA vez no nível de pacote. syscall.NewCallback
+// nunca libera o slot alocado (limite ~2000 por processo); criar um a cada chamada
+// de Games() derrubava o app com "too many callback functions" após ~2000 polls da
+// UI. O estado da enumeração corrente vive em gamesEnum, protegido por gamesMu — o
+// EnumWindows roda o callback de forma síncrona na mesma thread antes de retornar.
+type gamesEnum struct {
+	fgPID uint32
+	seen  map[uint32]bool
+	list  []GameProc
+}
+
+var (
+	gamesMu       sync.Mutex
+	gamesState    *gamesEnum
+	gamesCallback = syscall.NewCallback(enumGamesProc)
+)
+
+func enumGamesProc(hwnd uintptr, _ uintptr) uintptr {
+	st := gamesState
+	if st == nil {
+		return 0 // sem enumeração ativa: para
+	}
+	if vis, _, _ := procIsWindowVisible.Call(hwnd); vis == 0 {
+		return 1
+	}
+	// ignora tool windows (sem barra de tarefas). GWL_EXSTYLE = -20;
+	// convertido via variavel pois uintptr de constante negativa nao compila.
+	gwlExStyle := int32(-20)
+	if ex, _, _ := procGetWindowLongW.Call(hwnd, uintptr(gwlExStyle)); ex != 0 && uint32(ex)&wsExToolWindow != 0 {
+		return 1
+	}
+	ln, _, _ := procGetWindowTextLn.Call(hwnd)
+	if ln == 0 {
+		return 1 // sem titulo: ignora
+	}
+	buf := make([]uint16, ln+1)
+	procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	title := windows.UTF16ToString(buf)
+	if strings.TrimSpace(title) == "" {
+		return 1
+	}
+
+	var pid uint32
+	procGetWindowThread.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 || st.seen[pid] {
+		return 1
+	}
+	exe := processExe(pid)
+	le := strings.ToLower(exe)
+	if exe == "" || le == ownExe || shellExes[le] {
+		return 1
+	}
+	st.seen[pid] = true
+	st.list = append(st.list, GameProc{PID: pid, Exe: exe, Titulo: title, Foreground: pid == st.fgPID})
+	return 1 // continua
+}
+
 // Games lista processos com janela de topo visivel (candidatos a jogo).
 func Games() []GameProc {
 	fg, _, _ := procGetForeground.Call()
@@ -321,44 +405,12 @@ func Games() []GameProc {
 		procGetWindowThread.Call(fg, uintptr(unsafe.Pointer(&fgPID)))
 	}
 
-	seen := map[uint32]bool{}
-	var list []GameProc
-	cb := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
-		if vis, _, _ := procIsWindowVisible.Call(hwnd); vis == 0 {
-			return 1
-		}
-		// ignora tool windows (sem barra de tarefas). GWL_EXSTYLE = -20;
-		// convertido via variavel pois uintptr de constante negativa nao compila.
-		gwlExStyle := int32(-20)
-		if ex, _, _ := procGetWindowLongW.Call(hwnd, uintptr(gwlExStyle)); ex != 0 && uint32(ex)&wsExToolWindow != 0 {
-			return 1
-		}
-		ln, _, _ := procGetWindowTextLn.Call(hwnd)
-		if ln == 0 {
-			return 1 // sem titulo: ignora
-		}
-		buf := make([]uint16, ln+1)
-		procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
-		title := windows.UTF16ToString(buf)
-		if strings.TrimSpace(title) == "" {
-			return 1
-		}
-
-		var pid uint32
-		procGetWindowThread.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
-		if pid == 0 || seen[pid] {
-			return 1
-		}
-		exe := processExe(pid)
-		le := strings.ToLower(exe)
-		if exe == "" || le == ownExe || shellExes[le] {
-			return 1
-		}
-		seen[pid] = true
-		list = append(list, GameProc{PID: pid, Exe: exe, Titulo: title, Foreground: pid == fgPID})
-		return 1 // continua
-	})
-	procEnumWindows.Call(cb, 0)
+	gamesMu.Lock()
+	defer gamesMu.Unlock()
+	gamesState = &gamesEnum{fgPID: fgPID, seen: map[uint32]bool{}}
+	procEnumWindows.Call(gamesCallback, 0)
+	list := gamesState.list
+	gamesState = nil
 	return list
 }
 

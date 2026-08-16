@@ -4,6 +4,7 @@ package winutil
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -156,7 +157,15 @@ func (m *RepairManager) stream(name string, args ...string) {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	sc.Split(scanLinesCR)
 	for sc.Scan() {
-		chunk := strings.TrimSpace(sc.Text())
+		// SFC escreve UTF-16LE quando o stdout é um pipe (DISM/CHKDSK são ANSI).
+		// Remover os bytes nulos recupera o texto ASCII (o %, o veredito final de
+		// corrupção) — sem isso o rePct nunca casava e o log vinha ilegível.
+		line := sc.Text()
+		if strings.IndexByte(line, 0) >= 0 {
+			line = strings.ReplaceAll(line, "\x00", "")
+			line = strings.TrimPrefix(line, "\xff\xfe") // BOM UTF-16LE
+		}
+		chunk := strings.TrimSpace(line)
 		if chunk == "" {
 			continue
 		}
@@ -182,7 +191,16 @@ func (m *RepairManager) stream(name string, args ...string) {
 		}
 		m.appendLog(chunk)
 	}
-	cmd.Wait()
+	// Surface o resultado real: um exit code != 0 (ex.: DISM 0x800f081f "source não
+	// encontrada", SFC "não conseguiu reparar") era engolido e a etapa terminava como
+	// se tivesse dado certo. Agora o veredito aparece no log do cliente.
+	if err := cmd.Wait(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			m.appendLog(fmt.Sprintf("⚠ %s terminou com código %d — a etapa NÃO concluiu com sucesso.", name, ee.ExitCode()))
+		} else {
+			m.appendLog("⚠ " + name + " falhou: " + err.Error())
+		}
+	}
 }
 
 // windowsUpdateReset para os servicos, renomeia os caches e reinicia (padrao
@@ -196,6 +214,14 @@ func (m *RepairManager) windowsUpdateReset() {
 	win := os.Getenv("SystemRoot")
 	if win == "" {
 		win = `C:\Windows`
+	}
+	// Remove os .bak de resets anteriores — acumulavam GBs para sempre (nada os limpava).
+	for _, pat := range []string{filepath.Join(win, "SoftwareDistribution.bak-*"), filepath.Join(win, "System32", "catroot2.bak-*")} {
+		if olds, _ := filepath.Glob(pat); olds != nil {
+			for _, o := range olds {
+				os.RemoveAll(o)
+			}
+		}
 	}
 	stamp := time.Now().Format("20060102-150405")
 	renames := map[string]string{

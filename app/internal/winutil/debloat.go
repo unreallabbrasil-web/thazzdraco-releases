@@ -33,6 +33,17 @@ type bloatCatalogEntry struct {
 
 var bloatCatalog []bloatCatalogEntry
 var validPkg = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+var reSID = regexp.MustCompile(`^S-1-[0-9-]+$`)
+
+// appxUserClause devolve " -User '<sid>'" quando há um SID válido, para operar no
+// perfil do usuário interativo REAL — não no do admin que elevou o app (que pode ser
+// uma conta diferente). Sem isto, listava/removia bloatware do perfil errado.
+func appxUserClause(sid string) string {
+	if reSID.MatchString(sid) {
+		return " -User '" + sid + "'"
+	}
+	return ""
+}
 
 func loadBloatCatalog() {
 	if bloatCatalog != nil {
@@ -49,10 +60,10 @@ func loadBloatCatalog() {
 	}
 }
 
-// installedAppx devolve um mapa nome-de-família -> PackageFullName do usuário.
-func installedAppx() map[string]string {
+// installedAppx devolve um mapa nome-de-família -> PackageFullName do usuário real.
+func installedAppx(sid string) map[string]string {
 	m := map[string]string{}
-	out, err := psHidden(`Get-AppxPackage | ForEach-Object { "$($_.Name)|$($_.PackageFullName)" }`).Output()
+	out, err := psHidden(`Get-AppxPackage` + appxUserClause(sid) + ` | ForEach-Object { "$($_.Name)|$($_.PackageFullName)" }`).Output()
 	if err != nil {
 		return m
 	}
@@ -69,9 +80,9 @@ func installedAppx() map[string]string {
 // ListBloat devolve os apps de bloatware instalados (só os do catálogo seguro),
 // já com o PackageFullName real, ordenados por categoria. NUNCA inclui apps de
 // sistema — o casamento é por nome EXATO de família.
-func ListBloat() map[string]any {
+func ListBloat(sid string) map[string]any {
 	loadBloatCatalog()
-	inst := installedAppx()
+	inst := installedAppx(sid)
 	var apps []BloatApp
 	for _, c := range bloatCatalog {
 		if full, ok := inst[strings.ToLower(c.Name)]; ok {
@@ -95,7 +106,7 @@ func ListBloat() map[string]any {
 
 // RemoveBloat remove (por usuário) os pacotes informados. Reversível: o cliente
 // pode reinstalar pela Microsoft Store. Devolve removidos e falhas.
-func RemoveBloat(pacotes []string) map[string]any {
+func RemoveBloat(sid string, pacotes []string) map[string]any {
 	loadBloatCatalog()
 	allow := map[string]bool{}
 	for _, c := range bloatCatalog {
@@ -124,7 +135,7 @@ func RemoveBloat(pacotes []string) map[string]any {
 		return map[string]any{"removidos": removidos, "falhas": falhas}
 	}
 	script := "$ErrorActionPreference='Stop'; foreach($p in @(" + strings.Join(quoted, ",") +
-		")){ try{ Remove-AppxPackage -Package $p; Write-Output \"OK|$p\" }catch{ Write-Output \"ERR|$p\" } }"
+		")){ try{ Remove-AppxPackage -Package $p" + appxUserClause(sid) + "; Write-Output \"OK|$p\" }catch{ Write-Output \"ERR|$p\" } }"
 	out, _ := psHidden(script).Output()
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)

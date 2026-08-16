@@ -104,7 +104,9 @@ func NvidiaDriverPageURL(gpuName string) (string, error) {
 			bestLen = len(nameLower)
 			break // match exato — para na hora
 		}
-		if strings.Contains(nameLower, strings.TrimPrefix(cleanLower, "nvidia ")) && len(nameLower) > bestLen {
+		// Sem match exato, prefere o nome mais CURTO que contém a busca: "RTX 5070"
+		// deve casar o modelo base, não "RTX 5070 Ti SUPER" (superset mais longo).
+		if strings.Contains(nameLower, strings.TrimPrefix(cleanLower, "nvidia ")) && (bestPsid == "" || len(nameLower) < bestLen) {
 			bestPsid = v.Value
 			bestLen = len(nameLower)
 		}

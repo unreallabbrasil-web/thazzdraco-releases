@@ -4,6 +4,7 @@ package winutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -407,27 +408,74 @@ func gameTweakState(sid, exe string) (fso, gpu, prio bool) {
 // pasta no antivirus (Defender).
 func SetGameTweaks(sid, exe, folder string, fso, gpu, prio, av bool) error {
 	if exe != "" {
-		if fso {
-			WriteString("HKCU", sid, true, regLayers, exe, "~ "+fsoFlag)
-		} else {
-			RemoveValue("HKCU", sid, true, regLayers, exe)
-		}
-		if gpu {
-			WriteString("HKCU", sid, true, regGpuPref, exe, gpuHighVal)
-		} else {
-			RemoveValue("HKCU", sid, true, regGpuPref, exe)
-		}
+		// FSO: adiciona/remove SÓ o token no valor de Layers, preservando outras
+		// flags de compatibilidade do usuário (RUNASADMIN, HIGHDPIAWARE) — antes
+		// sobrescrevíamos/apagávamos o valor inteiro e o jogo podia perder o admin.
+		setLayerFlag(sid, exe, fsoFlag, fso)
+		setGpuPref(sid, exe, gpu)
 		perf := ifeoBase + filepath.Base(exe) + `\PerfOptions`
 		if prio {
 			WriteDWord("HKLM", "", false, perf, "CpuPriorityClass", 3) // 3 = Alta
 		} else {
 			RemoveValue("HKLM", "", false, perf, "CpuPriorityClass")
+			// Não deixa chaves IFEO vazias para trás (gatilho de heurística de AV).
+			DeleteKeyIfEmpty("HKLM", "", false, perf)
+			DeleteKeyIfEmpty("HKLM", "", false, ifeoBase+filepath.Base(exe))
 		}
 	}
 	if folder != "" {
-		defenderExclude(folder, av)
+		if err := defenderExclude(folder, av); err != nil && av {
+			// Falha ao ADICIONAR exclusão costuma ser Tamper Protection/política —
+			// propaga para a UI em vez de fingir que aplicou.
+			return fmt.Errorf("não consegui excluir a pasta no Defender (Tamper Protection ativa?): %w", err)
+		}
 	}
 	return nil
+}
+
+// setLayerFlag adiciona/remove um token no valor AppCompatFlags\Layers do exe,
+// preservando os demais tokens; apaga o valor se não sobrar nenhum.
+func setLayerFlag(sid, exe, flag string, add bool) {
+	cur, _ := ReadString("HKCU", sid, true, regLayers, exe)
+	var toks []string
+	for _, f := range strings.Fields(cur) {
+		if f == "~" || strings.EqualFold(f, flag) {
+			continue
+		}
+		toks = append(toks, f)
+	}
+	if add {
+		toks = append(toks, flag)
+	}
+	if len(toks) == 0 {
+		RemoveValue("HKCU", sid, true, regLayers, exe)
+		return
+	}
+	WriteString("HKCU", sid, true, regLayers, exe, "~ "+strings.Join(toks, " "))
+}
+
+// setGpuPref liga/desliga GpuPreference=2 no valor do exe, preservando outros
+// pares key=value; existentes; apaga o valor se ficar vazio.
+func setGpuPref(sid, exe string, add bool) {
+	cur, _ := ReadString("HKCU", sid, true, regGpuPref, exe)
+	var out []string
+	for _, p := range strings.Split(cur, ";") {
+		if p = strings.TrimSpace(p); p == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(p), "gpupreference=") {
+			continue
+		}
+		out = append(out, p)
+	}
+	if add {
+		out = append(out, "GpuPreference=2")
+	}
+	if len(out) == 0 {
+		RemoveValue("HKCU", sid, true, regGpuPref, exe)
+		return
+	}
+	WriteString("HKCU", sid, true, regGpuPref, exe, strings.Join(out, ";")+";")
 }
 
 // ---- Defender (unica parte que usa PowerShell — nao ha API nativa limpa) ----
@@ -453,12 +501,13 @@ func defenderExclusions() map[string]bool {
 	return set
 }
 
-// defenderExclude adiciona/remove a pasta das exclusoes do Defender.
-func defenderExclude(folder string, add bool) {
+// defenderExclude adiciona/remove a pasta das exclusoes do Defender. Devolve erro
+// (antes era engolido) — Tamper Protection/política fazem o Add falhar em silêncio.
+func defenderExclude(folder string, add bool) error {
 	folder = strings.ReplaceAll(folder, "'", "''")
-	cmd := "Add-MpPreference -ExclusionPath '" + folder + "'"
+	verb := "Add-MpPreference"
 	if !add {
-		cmd = "Remove-MpPreference -ExclusionPath '" + folder + "'"
+		verb = "Remove-MpPreference"
 	}
-	psHidden(cmd).Run()
+	return psHidden("$ErrorActionPreference='Stop'; " + verb + " -ExclusionPath '" + folder + "'").Run()
 }

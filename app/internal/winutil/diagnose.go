@@ -25,6 +25,29 @@ type Gargalo struct {
 // Diagnose roda todas as sondas e devolve os gargalos que impactam o FPS,
 // junto com um resumo. Tudo via leitura nativa — nenhum dado e estimado.
 func Diagnose(sid string) map[string]any {
+	g := Gargalos(sid)
+
+	cr, at, bo := 0, 0, 0
+	for _, x := range g {
+		switch x.Severidade {
+		case "critico":
+			cr++
+		case "atencao":
+			at++
+		case "bom":
+			bo++
+		}
+	}
+	return map[string]any{
+		"resumo":   map[string]any{"criticos": cr, "atencoes": at, "bons": bo, "total": len(g)},
+		"gargalos": g,
+	}
+}
+
+// Gargalos roda as sondas e devolve os achados ordenados por severidade. Existe
+// separado de Diagnose porque o plano da sessao precisa da lista tipada, nao do
+// mapa que a UI consome.
+func Gargalos(sid string) []Gargalo {
 	var g []Gargalo
 	g = appendIf(g, checkXMP())
 	g = appendIf(g, checkRefresh())
@@ -44,21 +67,7 @@ func Diagnose(sid string) map[string]any {
 		}
 	}
 
-	cr, at, bo := 0, 0, 0
-	for _, x := range g {
-		switch x.Severidade {
-		case "critico":
-			cr++
-		case "atencao":
-			at++
-		case "bom":
-			bo++
-		}
-	}
-	return map[string]any{
-		"resumo":   map[string]any{"criticos": cr, "atencoes": at, "bons": bo, "total": len(g)},
-		"gargalos": g,
-	}
+	return g
 }
 
 func appendIf(g []Gargalo, x *Gargalo) []Gargalo {
@@ -104,10 +113,11 @@ func checkRefresh() *Gargalo {
 		return nil
 	}
 	if atual < max-1 {
+		perda := (max - atual) * 100 / max // proporcional real, não "quase metade" fixo
 		return &Gargalo{
 			ID: "display.refresh", Titulo: "Tela abaixo da taxa máxima", Severidade: "critico",
 			Detectado: fmt.Sprintf("Monitor a %d Hz, mas suporta %d Hz", atual, max),
-			Impacto:   fmt.Sprintf("Você está jogando a %d Hz num painel de %d Hz — joga fora quase metade da fluidez que o monitor entrega.", atual, max),
+			Impacto:   fmt.Sprintf("Você está jogando a %d Hz num painel de %d Hz — perde cerca de %d%% da fluidez que o monitor entrega.", atual, max, perda),
 			Correcao:  fmt.Sprintf("Configurações → Sistema → Vídeo → Vídeo avançado → Taxa de atualização → %d Hz.", max),
 			Acao:      "manual",
 		}
@@ -281,13 +291,18 @@ func checkDGPUNotebook() *Gargalo {
 	if !laptop {
 		return nil
 	}
-	hasDGPU := false
+	// dGPU real num notebook = NVIDIA presente (num laptop é sempre discreta, via
+	// Optimus) OU dois adaptadores físicos distintos (iGPU + dGPU). Só "Vendor==AMD"
+	// dava falso positivo: "AMD Radeon(TM) Graphics" é a iGPU do Ryzen, não uma placa
+	// dedicada — um notebook Ryzen sem dGPU recebia o aviso à toa.
+	hasNvidia, count := false, 0
 	for _, g := range GPUs() {
-		if g.Vendor == "NVIDIA" || g.Vendor == "AMD" {
-			hasDGPU = true
+		count++
+		if g.Vendor == "NVIDIA" {
+			hasNvidia = true
 		}
 	}
-	if !hasDGPU {
+	if !hasNvidia && count < 2 {
 		return nil
 	}
 	return &Gargalo{

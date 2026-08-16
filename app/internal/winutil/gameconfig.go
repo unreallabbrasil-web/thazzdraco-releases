@@ -146,7 +146,6 @@ var gameCatalog = []gameDef{
 			{Key: "setting.defaultres,setting.defaultresheight", Label: "Resolução", Type: "res", Options: resOpts},
 			{Key: "setting.fullscreen", Label: "Modo de tela", Type: "enum", Options: []CfgOpt{
 				{Label: "Tela cheia", Value: "1"},
-				{Label: "Sem borda (Borderless)", Value: "0"},
 				{Label: "Janela", Value: "0"},
 			}},
 			{Key: "setting.gpu_level", Label: "Detalhe de shader", Type: "enum", Options: qualOpts},
@@ -222,7 +221,7 @@ var gameCatalog = []gameDef{
 		},
 	},
 	{
-		exeSubstr:  "bf1_x64.exe",
+		exeSubstr:  "bf1.exe",
 		gameLabel:  "Battlefield 1",
 		configPath: `%USERPROFILE%\Documents\Battlefield 1\settings\PROFSAVE_profile`,
 		format:     "frostbite",
@@ -378,6 +377,9 @@ func writeGameDef(def gameDef, newVals map[string]string) error {
 	if err != nil {
 		return fmt.Errorf("arquivo não encontrado: %w", err)
 	}
+	// Backup do original antes de reescrever — era a única escrita de config sem
+	// rede de segurança; um arquivo corrompido resetava o perfil inteiro do jogo.
+	_ = os.WriteFile(cfgPath+".thazzdraco.bak", data, 0644)
 	var result string
 	switch def.format {
 	case "ueini":
@@ -393,7 +395,12 @@ func writeGameDef(def gameDef, newVals map[string]string) error {
 	default:
 		return fmt.Errorf("formato não suportado: %s", def.format)
 	}
-	return os.WriteFile(cfgPath, []byte(result), 0644)
+	// Escrita atômica (tmp + rename): um crash no meio não deixa a config truncada.
+	tmp := cfgPath + ".tztmp"
+	if err := os.WriteFile(tmp, []byte(result), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, cfgPath)
 }
 
 // ---- UE INI (section-aware) -------------------------------------------------

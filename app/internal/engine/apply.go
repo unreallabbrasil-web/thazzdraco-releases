@@ -57,15 +57,10 @@ type ApplyReport struct {
 
 var histMu sync.Mutex
 
-func dataDir() string {
-	base := os.Getenv("ProgramData")
-	if base == "" {
-		base = os.TempDir()
-	}
-	d := filepath.Join(base, "ThazzDraco")
-	os.MkdirAll(d, 0o755)
-	return d
-}
+// dataDir e writeFileAtomic vivem em winutil (fs.go) desde que a sessao passou a
+// gravar estado na mesma pasta — mantidos aqui como atalho para nao espalhar a
+// chamada em todo o motor.
+func dataDir() string { return winutil.DataDir() }
 
 func histPath() string { return filepath.Join(dataDir(), "historico.json") }
 
@@ -91,20 +86,37 @@ func saveHistoryLocked(h []BatchRecord) {
 	writeFileAtomic(histPath(), b)
 }
 
-// writeFileAtomic grava num arquivo temporario e renomeia por cima (atomico no
-// NTFS). Evita deixar o JSON truncado/corrompido se o processo morrer no meio da
-// escrita — protege o historico de undo e os backups, que sao a rede de seguranca.
-func writeFileAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+// hasData diz se um RuleUndo carrega algum snapshot reversível.
+func (u *RuleUndo) hasData() bool {
+	return u != nil && (len(u.Regs) > 0 || len(u.Servicos) > 0 || len(u.Powercfg) > 0)
 }
+
+// persistBatch grava o lote no histórico de forma incremental (write-ahead):
+// insere ou substitui o registro com o mesmo ID. Chamado após CADA regra que
+// produz undo, para que um crash/kill no meio do lote não apague os snapshots já
+// escritos — a rede de segurança do undo exato precisa sobreviver a falha parcial.
+func persistBatch(batch BatchRecord) {
+	if len(batch.Rules) == 0 {
+		return
+	}
+	histMu.Lock()
+	defer histMu.Unlock()
+	h := loadHistoryLocked()
+	found := false
+	for i := range h {
+		if h[i].ID == batch.ID {
+			h[i] = batch
+			found = true
+			break
+		}
+	}
+	if !found {
+		h = append(h, batch)
+	}
+	saveHistoryLocked(h)
+}
+
+func writeFileAtomic(path string, data []byte) error { return winutil.WriteFileAtomic(path, data) }
 
 // ---- Log de operacoes (auditoria antes/depois) ------------------------------
 
@@ -180,6 +192,15 @@ func logApplied(ts string, r *Rule, undo *RuleUndo, freedMB float64) {
 // aplicadas e as que pedem consentimento sem `confirmar`). Cria 1 ponto de
 // restauracao no inicio e registra snapshots para undo exato.
 func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem string) ApplyReport {
+	return ApplyRulesProgresso(rules, ids, ctx, confirmar, origem, nil)
+}
+
+// ApplyRulesProgresso e o ApplyRules com aviso de andamento: `progresso` e
+// chamado antes de cada regra. Existe para a fila da sessao poder mostrar onde
+// esta sem quebrar a garantia de UM lote (e UM ponto de restauracao) por
+// chamada — que e o que mantem o undo por lote fazendo sentido.
+func ApplyRulesProgresso(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem string,
+	progresso func(id, titulo string, feitos, total int)) ApplyReport {
 	rep := ApplyReport{Erros: map[string]string{}}
 	byID := map[string]*Rule{}
 	for i := range rules {
@@ -211,8 +232,15 @@ func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem stri
 	}
 	logOp(fmt.Sprintf("=== %s  LOTE %s  origem=%s ===", batch.Quando, batch.ID, origem))
 
-	for _, id := range ids {
+	for i, id := range ids {
 		r := byID[id]
+		if progresso != nil {
+			titulo := id
+			if r != nil {
+				titulo = r.Titulo
+			}
+			progresso(id, titulo, i, len(ids))
+		}
 		if r == nil || r.Action == nil {
 			rep.Puladas = append(rep.Puladas, id)
 			continue
@@ -232,8 +260,17 @@ func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem stri
 		}
 
 		undo, freed, err := applyAction(r, ctx)
+		// Persiste o snapshot ANTES de tratar o erro: se a escrita falhou no meio
+		// (ex.: 3ª de 4 chaves), os valores já escritos precisam ficar no histórico
+		// para o undo exato — senão a escrita parcial fica órfã, sem reversão.
+		if undo.hasData() {
+			batch.Rules = append(batch.Rules, *undo)
+			rep.BatchID = batch.ID
+			persistBatch(batch) // write-ahead: cada regra é gravada na hora
+		}
 		if err != nil {
 			rep.Erros[id] = err.Error()
+			logApplied(batch.Quando, r, undo, 0)
 			continue
 		}
 		rep.Aplicadas = append(rep.Aplicadas, id)
@@ -241,18 +278,7 @@ func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem stri
 		if r.RequerReboot {
 			rep.RequerReboot = true
 		}
-		if undo != nil {
-			batch.Rules = append(batch.Rules, *undo)
-		}
 		logApplied(batch.Quando, r, undo, freed)
-	}
-
-	if len(batch.Rules) > 0 {
-		histMu.Lock()
-		h := append(loadHistoryLocked(), batch)
-		saveHistoryLocked(h)
-		histMu.Unlock()
-		rep.BatchID = batch.ID
 	}
 	return rep
 }
@@ -267,7 +293,9 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 		for _, v := range a.Valores {
 			snap := winutil.SnapshotValue(a.Hive, ctx.Sid, a.HkcuRealUser, a.Path, v.Name)
 			undo.Regs = append(undo.Regs, snap)
-			if err := applyRegValue(a.Hive, ctx.Sid, a.HkcuRealUser, a.Path, v); err != nil {
+			fallback, err := applyRegValue(a.Hive, ctx.Sid, a.HkcuRealUser, a.Path, v)
+			undo.Regs[len(undo.Regs)-1].Fallback = fallback
+			if err != nil {
 				return undo, 0, err
 			}
 		}
@@ -283,7 +311,9 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 			for _, v := range a.Valores {
 				snap := winutil.SnapshotValue(a.Hive, ctx.Sid, false, full, v.Name)
 				undo.Regs = append(undo.Regs, snap)
-				if err := applyRegValue(a.Hive, ctx.Sid, false, full, v); err != nil {
+				fallback, err := applyRegValue(a.Hive, ctx.Sid, false, full, v)
+				undo.Regs[len(undo.Regs)-1].Fallback = fallback
+				if err != nil {
 					return undo, 0, err
 				}
 			}
@@ -310,7 +340,10 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 				undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setactive", Scheme: winutil.ActiveScheme()})
 			} else if len(cmd) >= 5 && cmd[0] == "/setacvalueindex" {
 				old, had := winutil.PowercfgAcValue(cmd[2], cmd[3])
-				undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setacvalue", Sub: cmd[2], Setting: cmd[3], OldValue: old, HadValue: had})
+				// Guarda o GUID do esquema ATIVO no momento da escrita: o undo grava
+				// nele, não no "SCHEME_CURRENT" do momento do desfazer (que pode ser
+				// outro plano — corrompia um esquema não tocado).
+				undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setacvalue", Scheme: winutil.ActiveScheme(), Sub: cmd[2], Setting: cmd[3], OldValue: old, HadValue: had})
 			}
 		}
 		for _, cmd := range a.Comandos {
@@ -325,9 +358,14 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 		// (Ultimate); notebook -> Alto Desempenho (Ultimate fritaria a bateria).
 		undo.Powercfg = append(undo.Powercfg, PowercfgUndo{Kind: "setactive", Scheme: winutil.ActiveScheme()})
 		if ctxDesktop(ctx) {
-			winutil.UltimatePerformance()
+			res := winutil.UltimatePerformance()
+			if ok, _ := res["ok"].(bool); !ok {
+				return undo, 0, fmt.Errorf("falha ao ativar plano de desempenho máximo")
+			}
 		} else {
-			winutil.RunPowercfg("/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c")
+			if _, err := winutil.RunPowercfg("/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"); err != nil {
+				return undo, 0, err
+			}
 		}
 		return undo, 0, nil
 
@@ -348,7 +386,7 @@ func ctxDesktop(ctx Ctx) bool {
 	return true // sem info: assume desktop
 }
 
-func applyRegValue(hive, sid string, hkcuReal bool, path string, v RegVal) error {
+func applyRegValue(hive, sid string, hkcuReal bool, path string, v RegVal) (fallback bool, err error) {
 	switch v.ValueType {
 	case "DWord":
 		n, _ := numOf(v.Value)
@@ -356,7 +394,7 @@ func applyRegValue(hive, sid string, hkcuReal bool, path string, v RegVal) error
 	case "String":
 		return winutil.WriteString(hive, sid, hkcuReal, path, v.Name, asString(v.Value))
 	}
-	return fmt.Errorf("value_type nao suportado: %s", v.ValueType)
+	return false, fmt.Errorf("value_type nao suportado: %s", v.ValueType)
 }
 
 // isSafeCleanup so libera pastas temporarias/cache (allowlist). Espelha
@@ -396,13 +434,30 @@ func runCleanup(dirs []string) float64 {
 
 // ---- Desfazer ---------------------------------------------------------------
 
-func revertRule(ru RuleUndo) {
+// revertRule tenta reverter uma regra e devolve erro se ALGUMA restauração falhar
+// (ex.: rodou sem elevação e a escrita HKLM foi negada). O chamador usa isso para
+// NÃO remover do histórico o que não foi de fato revertido — senão a UI mostraria
+// "desfeito" com o sistema ainda alterado e a info de undo perdida para sempre.
+// revertRule reverte uma regra. `skip` (pode ser nil) contém chaves de registro
+// tocadas por lotes MAIS NOVOS: essas não são revertidas agora (o lote novo precisa
+// ser desfeito primeiro, senão restauraríamos um valor intermediário) — a regra fica
+// no histórico para nova tentativa.
+func revertRule(ru RuleUndo, skip map[string]bool) error {
+	var errs []string
 	for _, snap := range ru.Regs {
-		_ = winutil.RestoreSnapshot(snap)
+		if skip != nil && skip[regKey(snap)] {
+			errs = append(errs, "reg "+snap.Name+": desfaça primeiro o lote mais novo que alterou este valor")
+			continue
+		}
+		if err := winutil.RestoreSnapshot(snap); err != nil {
+			errs = append(errs, "reg "+snap.Name+": "+err.Error())
+		}
 	}
 	for _, s := range ru.Servicos {
 		if s.Existed {
-			_ = winutil.SetServiceStartType(s.Name, s.OldStartType)
+			if err := winutil.SetServiceStartType(s.Name, s.OldStartType); err != nil {
+				errs = append(errs, "svc "+s.Name+": "+err.Error())
+			}
 		}
 	}
 	// Powercfg em ordem reversa: restaura valores AC e reativa esquemas.
@@ -411,16 +466,54 @@ func revertRule(ru RuleUndo) {
 		switch p.Kind {
 		case "setacvalue":
 			if p.HadValue {
-				winutil.RunPowercfg("/setacvalueindex", "SCHEME_CURRENT", p.Sub, p.Setting, strconv.FormatInt(p.OldValue, 10))
-				winutil.RunPowercfg("/setactive", "SCHEME_CURRENT")
+				scheme := p.Scheme
+				if scheme == "" {
+					scheme = "SCHEME_CURRENT"
+				}
+				if _, err := winutil.RunPowercfg("/setacvalueindex", scheme, p.Sub, p.Setting, strconv.FormatInt(p.OldValue, 10)); err != nil {
+					errs = append(errs, "powercfg "+p.Setting+": "+err.Error())
+				}
+				// Só re-aplica se esse esquema for o ativo agora — não troca o plano do usuário.
+				if scheme == "SCHEME_CURRENT" || scheme == winutil.ActiveScheme() {
+					winutil.RunPowercfg("/setactive", scheme)
+				}
 			}
 		case "setactive":
 			if p.Scheme != "" {
-				winutil.RunPowercfg("/setactive", p.Scheme)
+				if _, err := winutil.RunPowercfg("/setactive", p.Scheme); err != nil {
+					errs = append(errs, "powercfg esquema: "+err.Error())
+				}
 			}
 		}
 	}
+	if len(errs) > 0 {
+		logOp(fmt.Sprintf("[%s] FALHA-UNDO %-34s %s", time.Now().Format("2006-01-02 15:04:05"), ru.RuleID, strings.Join(errs, "; ")))
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
 	logOp(fmt.Sprintf("[%s] DESFEITO  %-34s %s", time.Now().Format("2006-01-02 15:04:05"), ru.RuleID, ru.Titulo))
+	return nil
+}
+
+// regKey identifica um valor de registro (para detectar sobreposição entre lotes).
+func regKey(s winutil.RegSnapshot) string {
+	return s.Hive + "|" + s.Sid + "|" + s.Path + "|" + s.Name
+}
+
+// newerRegKeys coleta as chaves de registro tocadas por um conjunto de lotes (os
+// mais novos), para a disciplina LIFO do undo.
+func newerRegKeys(batches []BatchRecord) map[string]bool {
+	m := map[string]bool{}
+	for _, b := range batches {
+		for _, ru := range b.Rules {
+			for _, s := range ru.Regs {
+				m[regKey(s)] = true
+			}
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // UndoBatch desfaz um lote inteiro e o remove do historico.
@@ -438,13 +531,28 @@ func UndoBatch(batchID string) (int, error) {
 	if idx < 0 {
 		return 0, fmt.Errorf("lote nao encontrado: %s", batchID)
 	}
-	n := len(h[idx].Rules)
+	skip := newerRegKeys(h[idx+1:]) // valores tocados por lotes mais novos: LIFO
+	var kept []RuleUndo
+	var falhas []string
+	reverted := 0
 	for i := len(h[idx].Rules) - 1; i >= 0; i-- {
-		revertRule(h[idx].Rules[i])
+		if err := revertRule(h[idx].Rules[i], skip); err != nil {
+			kept = append(kept, h[idx].Rules[i]) // mantém no histórico p/ nova tentativa
+			falhas = append(falhas, h[idx].Rules[i].RuleID)
+		} else {
+			reverted++
+		}
 	}
-	h = append(h[:idx], h[idx+1:]...)
+	if len(kept) == 0 {
+		h = append(h[:idx], h[idx+1:]...) // tudo revertido: remove o lote
+	} else {
+		h[idx].Rules = kept // guarda só o que faltou reverter
+	}
 	saveHistoryLocked(h)
-	return n, nil
+	if len(falhas) > 0 {
+		return reverted, fmt.Errorf("falha ao reverter %d regra(s) (sem permissão?): %s", len(falhas), strings.Join(falhas, ", "))
+	}
+	return reverted, nil
 }
 
 // UndoRule desfaz a aplicacao mais recente de uma regra especifica.
@@ -455,7 +563,9 @@ func UndoRule(ruleID string) error {
 	for bi := len(h) - 1; bi >= 0; bi-- {
 		for ri := len(h[bi].Rules) - 1; ri >= 0; ri-- {
 			if h[bi].Rules[ri].RuleID == ruleID {
-				revertRule(h[bi].Rules[ri])
+				if err := revertRule(h[bi].Rules[ri], newerRegKeys(h[bi+1:])); err != nil {
+					return err // não remove do histórico: reversão falhou (ou lote mais novo pendente)
+				}
 				h[bi].Rules = append(h[bi].Rules[:ri], h[bi].Rules[ri+1:]...)
 				if len(h[bi].Rules) == 0 {
 					h = append(h[:bi], h[bi+1:]...)
@@ -468,18 +578,32 @@ func UndoRule(ruleID string) error {
 	return fmt.Errorf("regra nao encontrada no historico: %s", ruleID)
 }
 
-// UndoAll desfaz todos os lotes (mais novos primeiro) e limpa o historico.
+// UndoAll desfaz todos os lotes (mais novos primeiro). Mantém no histórico só o
+// que NÃO conseguiu reverter, para nova tentativa — nunca apaga o que continua
+// aplicado. Devolve quantas regras foram de fato revertidas.
 func UndoAll() int {
 	histMu.Lock()
 	defer histMu.Unlock()
 	h := loadHistoryLocked()
 	count := 0
+	var restante []BatchRecord
+	// Do MAIS NOVO ao mais antigo (LIFO): desfazer na ordem inversa garante que um
+	// valor tocado por vários lotes volte ao estado original correto.
 	for bi := len(h) - 1; bi >= 0; bi-- {
+		var kept []RuleUndo
 		for ri := len(h[bi].Rules) - 1; ri >= 0; ri-- {
-			revertRule(h[bi].Rules[ri])
-			count++
+			if err := revertRule(h[bi].Rules[ri], nil); err != nil {
+				kept = append(kept, h[bi].Rules[ri])
+			} else {
+				count++
+			}
+		}
+		if len(kept) > 0 {
+			b := h[bi]
+			b.Rules = kept
+			restante = append(restante, b)
 		}
 	}
-	saveHistoryLocked(nil)
+	saveHistoryLocked(restante)
 	return count
 }

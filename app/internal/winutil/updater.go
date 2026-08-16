@@ -5,9 +5,11 @@ package winutil
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,12 +20,33 @@ import (
 	"time"
 )
 
+// isTrustedUpdateURL só aceita HTTPS em hosts do GitHub. O updater substitui o
+// binário em execução e o relança COMO ADMIN — um download de host arbitrário
+// seria execução remota de código. Validar antes de baixar e em cada redirect.
+func isTrustedUpdateURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "github.com" || host == "api.github.com" {
+		return true
+	}
+	return strings.HasSuffix(host, ".githubusercontent.com")
+}
+
 // UpdateInfo descreve uma versão nova disponível no GitHub.
 type UpdateInfo struct {
 	Available   bool   `json:"available"`
 	Version     string `json:"version"`
 	Notes       string `json:"notes"`
 	DownloadURL string `json:"download_url"`
+	// SigURL e o .sig do release. Sem ele a atualizacao nao acontece: o app se
+	// substitui e relanca COMO ADMIN, entao instalar binario nao verificado
+	// seria entregar a maquina do cliente a quem controlar o repositorio.
+	SigURL string `json:"sig_url"`
+	// Assinado diz se este update tem como ser verificado por este build.
+	Assinado bool `json:"assinado"`
 }
 
 const (
@@ -120,11 +143,19 @@ func fetchUpdate(ctx context.Context, current string) (*UpdateInfo, bool) {
 		return &UpdateInfo{Available: false}, true
 	}
 
-	downloadURL := ""
+	downloadURL, sigURL := "", ""
 	for _, a := range release.Assets {
-		if strings.HasSuffix(strings.ToLower(a.Name), ".exe") {
-			downloadURL = a.BrowserDownloadURL
-			break
+		nome := strings.ToLower(a.Name)
+		if !isTrustedUpdateURL(a.BrowserDownloadURL) {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(nome, ".exe.sig"), strings.HasSuffix(nome, ".sig"):
+			sigURL = a.BrowserDownloadURL
+		case strings.HasSuffix(nome, ".exe"):
+			if downloadURL == "" {
+				downloadURL = a.BrowserDownloadURL
+			}
 		}
 	}
 
@@ -133,6 +164,8 @@ func fetchUpdate(ctx context.Context, current string) (*UpdateInfo, bool) {
 		Version:     remote,
 		Notes:       release.Body,
 		DownloadURL: downloadURL,
+		SigURL:      sigURL,
+		Assinado:    sigURL != "" && VerificacaoLigada(),
 	}, true
 }
 
@@ -170,16 +203,33 @@ func semverParts(v string) [3]int {
 // DownloadExe baixa o exe de url para um arquivo temporário.
 // progress(downloaded, total) é chamado a cada chunk; total pode ser -1.
 func DownloadExe(url string, progress func(int64, int64)) (string, error) {
+	if !isTrustedUpdateURL(url) {
+		return "", fmt.Errorf("URL de update não confiável (esperado https em github.com): %s", url)
+	}
 	tmp, err := os.CreateTemp("", "ThazzDraco_update_*.exe")
 	if err != nil {
 		return "", fmt.Errorf("criar temp: %w", err)
 	}
 	tmpPath := tmp.Name()
 
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := &http.Client{
+		Timeout: 10 * time.Minute,
+		// GitHub redireciona o browser_download_url para *.githubusercontent.com —
+		// cada salto tem de continuar em host confiável, senão aborta.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("excesso de redirecionamentos")
+			}
+			if !isTrustedUpdateURL(req.URL.String()) {
+				return fmt.Errorf("redirecionamento para host não confiável: %s", req.URL.Host)
+			}
+			return nil
+		},
+	}
 	resp, err := client.Get(url)
 	if err != nil {
-		tmp.Close(); os.Remove(tmpPath)
+		tmp.Close()
+		os.Remove(tmpPath)
 		return "", fmt.Errorf("download: %w", err)
 	}
 	defer resp.Body.Close()
@@ -191,7 +241,8 @@ func DownloadExe(url string, progress func(int64, int64)) (string, error) {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
 			if _, we := tmp.Write(buf[:n]); we != nil {
-				tmp.Close(); os.Remove(tmpPath)
+				tmp.Close()
+				os.Remove(tmpPath)
 				return "", fmt.Errorf("gravar: %w", we)
 			}
 			downloaded += int64(n)
@@ -203,12 +254,92 @@ func DownloadExe(url string, progress func(int64, int64)) (string, error) {
 			break
 		}
 		if rerr != nil {
-			tmp.Close(); os.Remove(tmpPath)
+			tmp.Close()
+			os.Remove(tmpPath)
 			return "", fmt.Errorf("leitura: %w", rerr)
 		}
 	}
 	tmp.Close()
 	return tmpPath, nil
+}
+
+// BaixarAtualizacaoVerificada baixa o exe E a assinatura, e só devolve o
+// caminho se a assinatura conferir com a chave pública deste build.
+//
+// É o único caminho que a UI deve usar. Recusar é o comportamento padrão:
+//   - build sem chave pública embutida  -> não atualiza (avisa para baixar à mão)
+//   - release sem .sig                  -> não atualiza
+//   - assinatura que não confere        -> não atualiza e apaga o arquivo baixado
+//
+// Antes disso, o app trocava o próprio binário e relançava como administrador
+// com o que quer que viesse da rede.
+func BaixarAtualizacaoVerificada(info *UpdateInfo, progress func(int64, int64)) (string, error) {
+	if info == nil || !info.Available || info.DownloadURL == "" {
+		return "", errors.New("sem atualização disponível")
+	}
+	if !VerificacaoLigada() {
+		return "", ErrSemChavePublica
+	}
+	if info.SigURL == "" {
+		return "", ErrSemAssinatura
+	}
+	exe, err := DownloadExe(info.DownloadURL, progress)
+	if err != nil {
+		return "", err
+	}
+	sig, err := baixarTexto(info.SigURL)
+	if err != nil {
+		os.Remove(exe)
+		return "", fmt.Errorf("baixar assinatura: %w", err)
+	}
+	defer os.Remove(sig)
+	if err := VerificarAssinatura(exe, sig); err != nil {
+		os.Remove(exe) // não deixa binário não verificado no disco
+		return "", err
+	}
+	return exe, nil
+}
+
+// baixarTexto baixa um arquivo pequeno (a assinatura) para um temporário.
+func baixarTexto(url string) (string, error) {
+	if !isTrustedUpdateURL(url) {
+		return "", fmt.Errorf("URL não confiável: %s", url)
+	}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("excesso de redirecionamentos")
+			}
+			if !isTrustedUpdateURL(req.URL.String()) {
+				return fmt.Errorf("redirecionamento para host não confiável: %s", req.URL.Host)
+			}
+			return nil
+		},
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	// teto pequeno: a assinatura tem 128 caracteres hex
+	dados, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp("", "ThazzDraco_sig_*.txt")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.Write(dados); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // SelfReplaceAndRestart substitui o exe em execução pelo novo e reinicia o app.

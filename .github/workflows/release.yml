@@ -22,7 +22,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26'
           cache-dependency-path: app/go.sum
 
       - name: Ler versão
@@ -32,6 +32,13 @@ jobs:
           $v = (Get-Content app/VERSION).Trim()
           echo "VERSION=$v" >> $env:GITHUB_OUTPUT
           echo "Versão: $v"
+
+      - name: Gerar recurso (icone + manifesto + versao)
+        working-directory: app
+        shell: pwsh
+        # Regenera resource.syso com a versao do arquivo VERSION — senao o exe do
+        # Release herda a versao antiga do resource.syso commitado (metadados stale).
+        run: python resgen.py
 
       - name: Build ThazzDraco.exe
         working-directory: app

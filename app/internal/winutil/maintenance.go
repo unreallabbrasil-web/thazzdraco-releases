@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // runCapture roda um comando SEM janela e devolve a saída combinada.
@@ -37,6 +38,20 @@ func lastNonEmpty(s string) string {
 // tipo TeamViewer). O reset do Winsock/IP só vale após reiniciar.
 func NetworkFlush() map[string]any {
 	log := []string{}
+	// Backup da configuração de rede ANTES do reset: o `netsh int ip reset` apaga
+	// IP estático/gateway/DNS no próximo boot. O dump permite restaurar tudo com
+	// `netsh -f "<arquivo>"`, mantendo a promessa de reversibilidade.
+	backupPath := ""
+	if dump, err := runCapture("netsh", "-c", "interface", "dump"); err == nil && strings.TrimSpace(dump) != "" {
+		dir := filepath.Join(os.Getenv("ProgramData"), "ThazzDraco")
+		if os.MkdirAll(dir, 0o755) == nil {
+			p := filepath.Join(dir, "rede-backup-"+time.Now().Format("20060102-150405")+".txt")
+			if os.WriteFile(p, []byte(dump), 0o644) == nil {
+				backupPath = p
+				log = append(log, "Backup da rede salvo em "+p)
+			}
+		}
+	}
 	add := func(label string, name string, args ...string) {
 		out, err := runCapture(name, args...)
 		s := strings.TrimSpace(lastNonEmpty(out))
@@ -48,7 +63,12 @@ func NetworkFlush() map[string]any {
 	add("Cache DNS", "ipconfig", "/flushdns")
 	add("Winsock", "netsh", "winsock", "reset")
 	add("Pilha TCP/IP", "netsh", "int", "ip", "reset")
-	return map[string]any{"ok": true, "log": log, "requer_reboot": true}
+	res := map[string]any{"ok": true, "log": log, "requer_reboot": true}
+	if backupPath != "" {
+		res["backup"] = backupPath
+		res["restaurar"] = `netsh -f "` + backupPath + `"`
+	}
+	return res
 }
 
 // OptimizeSSDs roda TRIM (re-trim) nos SSDs — a manutenção correta de SSD
@@ -66,17 +86,46 @@ func OptimizeSSDs() map[string]any {
 
 const highPerfGUID = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
 
+// ultimateGUIDPath guarda o GUID da cópia visível do plano Ultimate que criamos,
+// para reusá-la em vez de duplicar o template a cada ativação (o match por nome
+// falha em Windows PT-BR pelo codepage OEM da saída do powercfg).
+func ultimateGUIDPath() string {
+	dir := filepath.Join(os.Getenv("ProgramData"), "ThazzDraco")
+	os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "ultimate-plan.guid")
+}
+
+// schemeExists diz se um GUID de plano ainda aparece em `powercfg /list`.
+func schemeExists(guid string) bool {
+	out, _ := RunPowercfg("/list")
+	return strings.Contains(strings.ToLower(out), strings.ToLower(guid))
+}
+
 // UltimatePerformance ATIVA o plano "Desempenho Máximo Final" (Ultimate). O
 // template é oculto e não ativável direto: reusa uma cópia visível se já existe,
 // senão cria uma (com GUID próprio). Cai para Alto Desempenho se não rolar.
 func UltimatePerformance() map[string]any {
 	const tmpl = "e9a42b02-d5df-448d-aa00-03f14749eb61"
-	// 1) reusa um plano "Ultimate/Máximo" já criado (evita acumular cópias).
-	guid := FindSchemeGUIDByName("ultimate", "máximo", "maximo", "desempenho máximo")
+	// 1) reusa o GUID que JÁ criamos antes (salvo em disco). Independe de idioma —
+	//    em Windows PT-BR o nome do plano vem em codepage OEM e o match por nome
+	//    ("máximo") nunca casava, criando uma cópia nova do plano a CADA clique.
+	guid := ""
+	if b, err := os.ReadFile(ultimateGUIDPath()); err == nil {
+		if g := strings.TrimSpace(string(b)); reGUID.MatchString(g) && schemeExists(g) {
+			guid = g
+		}
+	}
+	// 2) senão, tenta por nome (funciona em Windows EN).
 	if guid == "" {
-		// 2) cria uma cópia visível do template e pega o GUID novo da saída.
+		guid = FindSchemeGUIDByName("ultimate", "máximo", "maximo", "desempenho máximo")
+	}
+	// 3) senão, cria uma cópia visível do template e SALVA o GUID novo p/ reuso.
+	if guid == "" || guid == tmpl {
 		out, _ := RunPowercfg("-duplicatescheme", tmpl)
 		guid = reGUID.FindString(out)
+		if guid != "" {
+			os.WriteFile(ultimateGUIDPath(), []byte(guid), 0o644)
+		}
 	}
 	if guid != "" && guid != tmpl {
 		if _, err := RunPowercfg("/setactive", guid); err == nil {
@@ -84,7 +133,9 @@ func UltimatePerformance() map[string]any {
 		}
 	}
 	// fallback seguro: Alto Desempenho clássico
-	RunPowercfg("/setactive", highPerfGUID)
+	if _, err := RunPowercfg("/setactive", highPerfGUID); err != nil {
+		return map[string]any{"ok": false, "mensagem": "Não foi possível ativar um plano de alto desempenho.", "erro": err.Error()}
+	}
 	return map[string]any{"ok": true, "mensagem": "Plano de alto desempenho ativado."}
 }
 

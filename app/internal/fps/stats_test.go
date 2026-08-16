@@ -18,8 +18,13 @@ func TestComputeStatsConstant(t *testing.T) {
 	if s.FPSAvg != 100 {
 		t.Errorf("FPSAvg = %v, esperado 100", s.FPSAvg)
 	}
-	if s.Low1 != 100 || s.Low01 != 100 {
-		t.Errorf("lows = %v/%v, esperado 100/100 (estavel)", s.Low1, s.Low01)
+	// Low1 continua valido; Low01 zera abaixo de 2000 quadros (sem lastro estatistico
+	// — 100 quadros dariam a media de 1 quadro so, ruido vendido como medicao).
+	if s.Low1 != 100 {
+		t.Errorf("Low1 = %v, esperado 100 (estavel)", s.Low1)
+	}
+	if s.Low01 != 0 {
+		t.Errorf("Low01 = %v, esperado 0 (poucos quadros p/ 0.1%% low)", s.Low01)
 	}
 	if s.StutterPct != 0 {
 		t.Errorf("stutter = %v, esperado 0", s.StutterPct)

@@ -110,10 +110,7 @@ func diskHealth() []DiskHealth {
 		path := fmt.Sprintf(`\\.\PhysicalDrive%d`, n)
 		tipo, ok := seekPenalty(path)
 		if !ok {
-			if n == 0 {
-				continue
-			}
-			break
+			continue // numeros de PhysicalDrive nao sao contiguos; nao para no primeiro gap
 		}
 		saude, risco := predictFailure(path)
 		out = append(out, DiskHealth{Numero: n, Tipo: tipo, Saude: saude, RiscoFalha: risco})

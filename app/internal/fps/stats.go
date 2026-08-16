@@ -9,12 +9,13 @@ import "sort"
 type FrameStats struct {
 	Processo   string    `json:"processo"`
 	FPSAvg     float64   `json:"fps_avg"`     // FPS medio
-	Low1       float64   `json:"low1"`        // 1% low (percentil 99 do frametime)
-	Low01      float64   `json:"low01"`       // 0.1% low (percentil 99.9)
+	Low1       float64   `json:"low1"`        // 1% low = FPS da media do pior 1% dos frametimes
+	Low01      float64   `json:"low01"`       // 0.1% low = FPS da media do pior 0.1%
 	FPSMin     float64   `json:"fps_min"`     // pior quadro (frametime maximo)
 	FPSMax     float64   `json:"fps_max"`     // melhor quadro
 	FrameCount int       `json:"frames"`      // quadros validos medidos
 	Dropped    int       `json:"dropped"`     // quadros descartados (nao exibidos)
+	Congelamentos int    `json:"congelamentos"` // quadros > 1000ms (freezes reais de >1s)
 	DurationS  float64   `json:"duracao_s"`   // duracao medida
 	StutterPct float64   `json:"stutter_pct"` // % de quadros > 2x a mediana (engasgo)
 	Frametimes []float64 `json:"frametimes"`  // serie (ms) reamostrada p/ o grafico
@@ -23,15 +24,26 @@ type FrameStats struct {
 // computeStats recebe os frametimes brutos (ms, em ordem temporal) e o numero
 // de quadros descartados, e devolve as estatisticas profissionais.
 func computeStats(proc string, raw []float64, dropped int) FrameStats {
-	// Filtra invalidos: frametime <= 0 ou absurdo (>1000ms = <1 FPS, ex.: o
-	// primeiro quadro/warm-up que carrega o delta desde o inicio da sessao).
+	// Descarta invalidos (<=0) e SO o primeiro quadro se for warm-up (ele carrega o
+	// delta desde o inicio da sessao, tipicamente >1s). NAO descarta por teto de
+	// valor: congelamentos reais de 1-3s (compilacao de shader, streaming de
+	// textura) sao exatamente o que o produto promete medir — some-los mascararia
+	// o "depois". Freezes legitimos ficam nas estatisticas e sao contados a parte.
 	ft := make([]float64, 0, len(raw))
-	for _, v := range raw {
-		if v > 0 && v <= 1000 {
-			ft = append(ft, v)
+	freezes := 0
+	for i, v := range raw {
+		if v <= 0 {
+			continue
 		}
+		if i == 0 && v > 1000 {
+			continue // warm-up: primeiro quadro desde o inicio da captura
+		}
+		if v > 1000 {
+			freezes++
+		}
+		ft = append(ft, v)
 	}
-	st := FrameStats{Processo: proc, FrameCount: len(ft), Dropped: dropped}
+	st := FrameStats{Processo: proc, FrameCount: len(ft), Dropped: dropped, Congelamentos: freezes}
 	if len(ft) == 0 {
 		return st
 	}
@@ -53,7 +65,12 @@ func computeStats(proc string, raw []float64, dropped int) FrameStats {
 	// que os reviewers/gamers usam (mais representativa do engasgo do que um
 	// quadro isolado). Quadros mais lentos ficam no fim do slice ordenado.
 	st.Low1 = round1(1000 / worstMean(sorted, 0.01))
-	st.Low01 = round1(1000 / worstMean(sorted, 0.001))
+	// 0.1% low só tem lastro estatístico com muitos quadros: abaixo de ~2000 ele é
+	// a média de 1–2 quadros (= FPSMin, com variância enorme entre execuções). Zera
+	// nesse caso — a UI oculta em vez de vender ruído como medição precisa.
+	if len(sorted) >= 2000 {
+		st.Low01 = round1(1000 / worstMean(sorted, 0.001))
+	}
 
 	// Engasgo: quadros acima de 2x a mediana do frametime.
 	med := percentile(sorted, 0.50)

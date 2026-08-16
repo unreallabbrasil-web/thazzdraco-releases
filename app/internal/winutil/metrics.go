@@ -97,6 +97,14 @@ func ramInfo() (float64, float64, int) {
 
 // ---- Uptime -----------------------------------------------------------------
 
+// UptimeSegundos devolve ha quantos segundos o Windows subiu. E o marcador que a
+// sessao usa para saber se o PC REALMENTE reiniciou: se o uptime de agora e
+// menor que o de quando o reinicio foi pedido, reiniciou.
+func UptimeSegundos() float64 {
+	r1, _, _ := procGetTickCount64.Call()
+	return float64(uint64(r1)) / 1000
+}
+
 func uptime() string {
 	r1, _, _ := procGetTickCount64.Call()
 	s := uint64(r1) / 1000

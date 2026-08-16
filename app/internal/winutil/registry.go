@@ -3,6 +3,8 @@
 package winutil
 
 import (
+	"fmt"
+
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -12,13 +14,21 @@ type RegSnapshot struct {
 	Hive     string `json:"hive"`
 	Sid      string `json:"sid,omitempty"`
 	HkcuReal bool   `json:"hkcu_real,omitempty"`
+	// Fallback marca que a ESCRITA de fato foi feita em HKEY_CURRENT_USER (nao em
+	// HKEY_USERS\<Sid>) porque o caminho preferido negou acesso — ver
+	// createKeyForWrite. O undo precisa saber disso pra restaurar na MESMA colmeia
+	// onde o valor realmente foi alterado, senao RestoreSnapshot tentaria escrever
+	// de volta no caminho negado e falharia do mesmo jeito.
+	Fallback bool   `json:"fallback,omitempty"`
 	Path     string `json:"path"`
 	Name     string `json:"name"`
-	Existed  bool   `json:"existed"`
-	Type     uint32 `json:"type,omitempty"`
-	DWord    uint32 `json:"dword,omitempty"`
-	QWord    uint64 `json:"qword,omitempty"`
-	Str      string `json:"str,omitempty"`
+	Existed  bool     `json:"existed"`
+	Type     uint32   `json:"type,omitempty"`
+	DWord    uint32   `json:"dword,omitempty"`
+	QWord    uint64   `json:"qword,omitempty"`
+	Str      string   `json:"str,omitempty"`
+	Multi    []string `json:"multi,omitempty"` // REG_MULTI_SZ
+	Bin      []byte   `json:"bin,omitempty"`   // REG_BINARY
 }
 
 // resolve mapeia (hive, sid, hkcuReal, path) para a chave-raiz e o subcaminho.
@@ -134,6 +144,12 @@ func SnapshotValue(hive, sid string, hkcuReal bool, path, name string) RegSnapsh
 	case registry.SZ, registry.EXPAND_SZ:
 		s, _, _ := k.GetStringValue(name)
 		snap.Str = s
+	case registry.MULTI_SZ:
+		ss, _, _ := k.GetStringsValue(name)
+		snap.Multi = ss
+	case registry.BINARY:
+		b, _, _ := k.GetBinaryValue(name)
+		snap.Bin = b
 	}
 	return snap
 }
@@ -141,6 +157,9 @@ func SnapshotValue(hive, sid string, hkcuReal bool, path, name string) RegSnapsh
 // RestoreSnapshot desfaz: regrava o valor antigo, ou apaga se ele nao existia.
 func RestoreSnapshot(s RegSnapshot) error {
 	root, sub := resolve(s.Hive, s.Sid, s.HkcuReal, s.Path)
+	if s.Fallback {
+		root, sub = registry.CURRENT_USER, s.Path
+	}
 	if !s.Existed {
 		k, err := registry.OpenKey(root, sub, registry.SET_VALUE)
 		if err != nil {
@@ -164,32 +183,60 @@ func RestoreSnapshot(s RegSnapshot) error {
 		return k.SetStringValue(s.Name, s.Str)
 	case registry.EXPAND_SZ:
 		return k.SetExpandStringValue(s.Name, s.Str)
+	case registry.MULTI_SZ:
+		return k.SetStringsValue(s.Name, s.Multi)
+	case registry.BINARY:
+		return k.SetBinaryValue(s.Name, s.Bin)
 	}
-	return nil
+	// Tipo não suportado (RESOURCE_LIST etc.): sinaliza em vez de fingir sucesso —
+	// o undo mantém o item no histórico para nova tentativa em vez de perdê-lo.
+	return fmt.Errorf("tipo de registro %d não suportado no undo (%s)", s.Type, s.Name)
 }
 
 // ---- Escrita (apply) ---------------------------------------------------------
 
-// WriteDWord cria a chave se preciso e grava um DWORD.
-func WriteDWord(hive, sid string, hkcuReal bool, path, name string, val uint32) error {
+// createKeyForWrite abre/cria a chave em HKEY_USERS\<SID>\... (colmeia real do
+// usuario). Se isso falhar — perfil sem SID resolvido, hive nao carregada do
+// jeito esperado, ACL que nega ao processo elevado o que so o dono concederia
+// via HKCU normal — cai para HKEY_CURRENT_USER, espelhando o fallback que
+// ReadInteger/ReadString ja fazem na leitura. Sem isso, a escrita ficava
+// "Access is denied" numa maquina onde a leitura (via HKCU) funcionaria.
+func createKeyForWrite(hive, sid string, hkcuReal bool, path string) (k registry.Key, fallback bool, err error) {
 	root, sub := resolve(hive, sid, hkcuReal, path)
-	k, _, err := registry.CreateKey(root, sub, registry.SET_VALUE)
-	if err != nil {
-		return err
+	k, _, err = registry.CreateKey(root, sub, registry.SET_VALUE)
+	if err == nil {
+		return k, false, nil
 	}
-	defer k.Close()
-	return k.SetDWordValue(name, val)
+	if hive != "HKLM" && hkcuReal {
+		if k2, _, err2 := registry.CreateKey(registry.CURRENT_USER, path, registry.SET_VALUE); err2 == nil {
+			return k2, true, nil
+		}
+	}
+	return registry.Key(0), false, err
 }
 
-// WriteString cria a chave se preciso e grava um SZ.
-func WriteString(hive, sid string, hkcuReal bool, path, name, val string) error {
-	root, sub := resolve(hive, sid, hkcuReal, path)
-	k, _, err := registry.CreateKey(root, sub, registry.SET_VALUE)
+// WriteDWord cria a chave se preciso e grava um DWORD. `fallback` indica se a
+// escrita caiu para HKEY_CURRENT_USER — o chamador precisa gravar isso no
+// RegSnapshot pra o undo mirar a mesma colmeia.
+func WriteDWord(hive, sid string, hkcuReal bool, path, name string, val uint32) (fallback bool, err error) {
+	k, fallback, err := createKeyForWrite(hive, sid, hkcuReal, path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer k.Close()
-	return k.SetStringValue(name, val)
+	return fallback, k.SetDWordValue(name, val)
+}
+
+// WriteString cria a chave se preciso e grava um SZ. `fallback` indica se a
+// escrita caiu para HKEY_CURRENT_USER — o chamador precisa gravar isso no
+// RegSnapshot pra o undo mirar a mesma colmeia.
+func WriteString(hive, sid string, hkcuReal bool, path, name, val string) (fallback bool, err error) {
+	k, fallback, err := createKeyForWrite(hive, sid, hkcuReal, path)
+	if err != nil {
+		return false, err
+	}
+	defer k.Close()
+	return fallback, k.SetStringValue(name, val)
 }
 
 // NameVal é um par nome→valor (string) de um valor de registro.
@@ -252,6 +299,23 @@ func RemoveValue(hive, sid string, hkcuReal bool, path, name string) {
 	}
 	defer k.Close()
 	_ = k.DeleteValue(name)
+}
+
+// DeleteKeyIfEmpty apaga a chave se ela não tiver mais valores nem subchaves. Usado
+// para não deixar chaves IFEO (Image File Execution Options) vazias para trás ao
+// reverter a prioridade por-jogo — chaves IFEO residuais disparam heurística de AV.
+func DeleteKeyIfEmpty(hive, sid string, hkcuReal bool, path string) {
+	root, sub := resolve(hive, sid, hkcuReal, path)
+	k, err := registry.OpenKey(root, sub, registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS)
+	if err != nil {
+		return
+	}
+	vals, _ := k.ReadValueNames(1)
+	subs, _ := k.ReadSubKeyNames(1)
+	k.Close()
+	if len(vals) == 0 && len(subs) == 0 {
+		_ = registry.DeleteKey(root, sub)
+	}
 }
 
 // RealUserProfileDir devolve a pasta de perfil (ex.: C:\Users\fulano) do usuario

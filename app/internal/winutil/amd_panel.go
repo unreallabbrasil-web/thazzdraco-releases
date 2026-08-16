@@ -54,10 +54,14 @@ func AMDPanel() AMDPanelInfo {
 		return AMDPanelInfo{Disponivel: false}
 	}
 
-	vramMB := int(g.AdapterRAM / (1 << 20))
-	// Algumas GPUs AMD reportam AdapterRAM incorreto (4GB cap antigo). Se < 256MB, ignora.
-	if vramMB < 256 {
-		vramMB = 0
+	// VRAM real via registro do driver (qwMemorySize). O AdapterRAM do WMI é uint32
+	// e satura em ~4 GB — uma RX 7800 XT de 16 GB apareceria como "4096 MB". Só caímos
+	// no AdapterRAM quando a placa tem menos de 4 GB (aí o valor do WMI é confiável).
+	vramMB := int(adapterVRAMBytes(g.Name) / (1 << 20))
+	if vramMB <= 0 {
+		if wmiMB := int(g.AdapterRAM / (1 << 20)); wmiMB >= 256 && wmiMB < 4090 {
+			vramMB = wmiMB
+		}
 	}
 
 	return AMDPanelInfo{

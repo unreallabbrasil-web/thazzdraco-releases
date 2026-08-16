@@ -26,7 +26,7 @@ function sectionOf(cat) {
   return s ? s.key : null; // null = limpeza (vai pra pagina propria)
 }
 
-const state = { scan: null, rules: [], byId: {}, page: "inicio", cat: "todas", query: "", scoreInicial: null, startup: [], bench: null, benchBase: null, fps: null, fpsBase: null, fpsDur: 30, fpsPoll: null, fpsRefreshing: false, diag: null, driver: null, repairPoll: null, bloat: null, deep: null, thermal: null, clientLogo: null, admin: true, gpuPanel: null, customJogos: [], updatePoll: null, sub: { manutencao: "limpeza", medicao: "desempenho" } };
+const state = { scan: null, rules: [], byId: {}, page: "inicio", sessao: null, cat: "todas", query: "", scoreInicial: null, startup: [], bench: null, benchBase: null, fps: null, fpsBase: null, fpsDur: 30, fpsPoll: null, fpsRefreshing: false, diag: null, driver: null, repairPoll: null, bloat: null, deep: null, thermal: null, clientLogo: null, admin: true, gpuPanel: null, customJogos: [], updatePoll: null, sub: { manutencao: "limpeza", medicao: "desempenho" }, aba: {} };
 function escHtml(s) { return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 // "1 otimização aplicada" / "3 otimizações aplicadas" — evita repetir a formula ternária em cada toast.
 function pluralWord(n, singular, plural) { return n === 1 ? singular : (plural || singular + "s"); }
@@ -37,7 +37,12 @@ async function api(path, body) {
     ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
     : {};
   const r = await fetch(path, opt);
-  if (!r.ok) throw new Error("HTTP " + r.status);
+  if (!r.ok) {
+    // tenta extrair a mensagem real do servidor em vez de só "HTTP 500"
+    let msg = "HTTP " + r.status;
+    try { const j = await r.json(); if (j && (j.erro || j.error)) msg = j.erro || j.error; } catch (e) {}
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -425,23 +430,133 @@ function ingest(scan) {
   renderAll();
 }
 
+/* ---- Navegação: 5 nós ------------------------------------------------------
+   O app cresceu por acumulação: eram 8 nós soltos + 10 sub-abas + 7 botões no
+   HUD, e achar as coisas virou adivinhação. NOS reorganiza isso na mesma lógica
+   que a Sessão já provou — LER → AGIR → REGISTRAR:
+
+     Núcleo    o portal (identidade + Boost Score + escanear)
+     Sessão    o caminho guiado, ponta a ponta
+     Máquina   tudo que só LÊ e mede
+     Ações     tudo que ESCREVE
+     Registro  o que já foi feito
+
+   É só camada de apresentação: por baixo continuam valendo showPage/showSub, e
+   nenhuma tela precisou ser reescrita. `destino` aponta para [pagina] ou
+   [pagina, sub-aba]; `extras` empilha panes irmãos na mesma tela (Limpar reúne
+   limpeza + debloat + browsers, que eram três abas fazendo a mesma coisa).
+--------------------------------------------------------------------------- */
+const NOS = [
+  { id: "nucleo", nome: "Núcleo", icone: "home", destino: ["inicio"] },
+  { id: "sessao", nome: "Sessão", icone: "guide", badge: "navSessao", destino: ["sessao"] },
+  {
+    id: "maquina", nome: "Máquina", icone: "activity", abas: [
+      { id: "diagnostico", nome: "Diagnóstico", icone: "diag", destino: ["diagnostico"] },
+      { id: "desempenho", nome: "Desempenho", icone: "activity", destino: ["medicao", "desempenho"] },
+      { id: "disco", nome: "Disco", icone: "disk", destino: ["manutencao", "disco"] },
+      { id: "gpu", nome: "GPU", icone: "gpu", destino: ["gpu"] },
+      { id: "fps", nome: "FPS no jogo", icone: "game", destino: ["medicao", "fps"] },
+      { id: "benchmark", nome: "Benchmark", icone: "gauge", destino: ["medicao", "benchmark"] },
+    ],
+  },
+  {
+    id: "acoes", nome: "Ações", icone: "bolt", badge: "navOtim", abas: [
+      { id: "otimizacoes", nome: "Otimizações", icone: "bolt", destino: ["otimizacoes"] },
+      { id: "jogos", nome: "Jogos", icone: "gamepad", destino: ["jogos"] },
+      { id: "limpar", nome: "Limpar", icone: "broom", destino: ["manutencao", "limpeza"], extras: ["debloat", "browsers"] },
+      { id: "reparar", nome: "Reparar", icone: "wrench", destino: ["manutencao", "reparo"], extras: ["ferramentas"] },
+      { id: "inicializacao", nome: "Inicialização", icone: "rocket", destino: ["manutencao", "inicializacao"] },
+    ],
+  },
+  { id: "registro", nome: "Registro", icone: "history", destino: ["historico"] },
+];
+
+// índice reverso: "pagina" ou "pagina:sub" → {no, aba}
+const ONDE = (() => {
+  const m = {};
+  NOS.forEach((no) => {
+    const reg = (d, aba) => { m[d.length > 1 ? d[0] + ":" + d[1] : d[0]] = { no, aba }; };
+    if (no.destino) reg(no.destino, null);
+    (no.abas || []).forEach((a) => reg(a.destino, a));
+  });
+  return m;
+})();
+
+function achaNo(id) { return NOS.find((n) => n.id === id); }
+
+// renderNav monta o HUD de comando uma vez; sincronizaNav só acende o ativo.
+function renderNav() {
+  $("#mainnav").innerHTML = NOS.map((n) => `<a class="cn" data-no="${n.id}">
+    <span class="ic" data-icon="${n.icone}"></span>${n.badge ? `<span class="b" id="${n.badge}"></span>` : ""}
+    <span class="l">${n.nome}</span></a>`).join("");
+  $$("#mainnav [data-icon]").forEach((el) => { const ic = IC(el.dataset.icon); if (ic) el.innerHTML = ic; });
+}
+
+// sincronizaNav acende o nó/aba correspondentes ao que showPage/showSub abriram.
+// Fica no fim do roteador antigo, então a barra nunca discorda do que está na tela.
+function sincronizaNav() {
+  const chave = SUBPAGES[state.page] ? state.page + ":" + state.sub[state.page] : state.page;
+  const alvo = ONDE[chave] || ONDE[state.page] || {};
+  $$("#mainnav .cn").forEach((a) => a.classList.toggle("active", !!alvo.no && a.dataset.no === alvo.no.id));
+
+  const bar = $("#subGlobal");
+  const abas = (alvo.no && alvo.no.abas) || [];
+  bar.classList.toggle("show", abas.length > 0);
+  if (!abas.length) { bar.innerHTML = ""; return; }
+  bar.innerHTML = abas.map((a) => `<button data-aba="${a.id}" data-no="${alvo.no.id}"
+    class="${alvo.aba && a.id === alvo.aba.id ? "active" : ""}"><span data-icon="${a.icone}"></span>${a.nome}</button>`).join("");
+  $$("#subGlobal [data-icon]").forEach((el) => { const ic = IC(el.dataset.icon); if (ic) el.innerHTML = ic; });
+}
+
+// irNo abre um nó (na primeira aba, ou na última que o usuário viu nele).
+function irNo(id) {
+  const no = achaNo(id); if (!no) return;
+  if (no.destino) return abre(no.destino);
+  const aba = (no.abas || []).find((a) => a.id === state.aba[no.id]) || no.abas[0];
+  irAba(no.id, aba.id);
+}
+
+function irAba(noID, abaID) {
+  const no = achaNo(noID); if (!no) return;
+  const aba = (no.abas || []).find((a) => a.id === abaID); if (!aba) return;
+  state.aba[no.id] = aba.id; // volta nela quando o usuário voltar ao nó
+  abre(aba.destino, aba.extras);
+}
+
+// abre delega para o roteador antigo e, se a aba junta panes irmãos, liga os extras.
+function abre(destino, extras) {
+  if (destino.length > 1) showSub(destino[0], destino[1]); else showPage(destino[0]);
+  (extras || []).forEach((t) => {
+    const pn = $("#pane-mn-" + t); if (pn) pn.classList.add("active");
+    renderPaneExtra(t);
+  });
+}
+
+// renderPaneExtra dispara o render de um pane que veio junto (não é o principal).
+function renderPaneExtra(sub) {
+  if (sub === "debloat" && !state.bloat) renderBloat();
+  else if (sub === "browsers") renderBrowserClean();
+  else if (sub === "ferramentas") renderTools();
+}
+
 /* ---- Router (páginas + sub-abas) ----------------------------------------- */
 // Páginas que têm sub-abas: prefixo dos panes (pane-<prefixo>-<sub>).
 const SUBPAGES = {
-  manutencao: { nav: "subManut", prefix: "mn", tabs: ["limpeza", "reparo", "debloat", "ferramentas", "inicializacao", "browsers"] },
-  medicao:    { nav: "subMed",   prefix: "md", tabs: ["desempenho", "fps", "benchmark"] },
+  manutencao: { prefix: "mn", tabs: ["disco", "limpeza", "reparo", "debloat", "ferramentas", "inicializacao", "browsers"] },
+  medicao:    { prefix: "md", tabs: ["desempenho", "fps", "benchmark"] },
 };
 
 function showPage(name) {
   state.page = name;
-  $$(".mainnav a").forEach((a) => a.classList.toggle("active", a.dataset.page === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + name));
   $(".pages").scrollTop = 0;
   if (SUBPAGES[name]) { showSub(name, state.sub[name]); return; } // delega à sub-aba ativa
+  sincronizaNav();
   stopLiveJobs();             // saiu de toda página com job ao vivo
   if (name === "historico") renderHistorico();
   if (name === "jogos") { renderJogos(); initLiveGameBar(); }
   if (name === "gpu") renderGpu();
+  if (name === "sessao" && window.SESSAO) SESSAO.render(); // trilho do atendimento (sessao.js)
   if (name === "diagnostico") { if (state.diag) { renderDiag(); renderDriver(); } else runDiag(); }
 }
 
@@ -451,13 +566,14 @@ function showSub(page, sub) {
   if (!cfg.tabs.includes(sub)) sub = cfg.tabs[0];
   state.sub[page] = sub;
   if (state.page !== page) return showPage(page); // showPage chama showSub de volta
-  $$("#" + cfg.nav + " button").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
   cfg.tabs.forEach((t) => { const pn = $("#pane-" + cfg.prefix + "-" + t); if (pn) pn.classList.toggle("active", t === sub); });
   $(".pages").scrollTop = 0;
+  sincronizaNav();
   stopLiveJobs(page + ":" + sub); // para o que não é desta sub-aba
   // dispara o render da sub-aba ativa
   if (page === "manutencao") {
-    if (sub === "limpeza" && !state.deep) renderDeepClean();
+    if (sub === "disco") { if (window.DISCO) DISCO.abrir(); }
+    else if (sub === "limpeza" && !state.deep) renderDeepClean();
     else if (sub === "debloat" && !state.bloat) renderBloat();
     else if (sub === "ferramentas") renderTools();
     else if (sub === "inicializacao") renderStartup();
@@ -465,7 +581,15 @@ function showSub(page, sub) {
     else if (sub === "reparo" && !state.repairPoll) api("/api/reparo/status").then((st) => { if (st.estado === "rodando" || st.log?.length) pollRepair(); }).catch(() => {});
   } else if (page === "medicao") {
     if (sub === "desempenho") { startMetrics(); renderHealth(); }
-    else if (sub === "fps") { renderFpsGames(); renderFps(); }
+    else if (sub === "fps") {
+      renderFpsGames(); renderFps();
+      // Retoma uma captura em andamento (ou colhe o resultado) se o usuário saiu e
+      // voltou — senão o botão ficava travado e o resultado nunca aparecia.
+      if (!state.fpsPoll) api("/api/fps/status").then((st) => {
+        if (st.estado === "capturando") { const b = $("#btnFps"); if (b) b.disabled = true; pollFps(); }
+        else if (st.estado === "pronto" && st.resultado && !state.fps) pollFps();
+      }).catch(() => {});
+    }
     else if (sub === "benchmark") renderBench();
   }
 }
@@ -476,13 +600,27 @@ function stopLiveJobs(dest) {
   if (dest !== LIVE.METRICAS) stopMetrics();
   if (dest !== LIVE.FPS && state.fpsPoll) { clearInterval(state.fpsPoll); state.fpsPoll = null; }
   if (dest !== LIVE.REPARO && state.repairPoll) { clearInterval(state.repairPoll); state.repairPoll = null; }
+  // Polls de driver (auditoria/instalação WUA): param ao sair da aba para não
+  // ficarem órfãos consultando o status global indefinidamente.
+  if (state.drvAuditPoll) { clearInterval(state.drvAuditPoll); state.drvAuditPoll = null; const b = $("#btnDriverAudit"); if (b) b.disabled = false; }
+  if (state.drvInstallPoll) { clearInterval(state.drvInstallPoll); state.drvInstallPoll = null; }
   if (dest !== "jogos") stopLiveGamePoll(); // F1: para o poll de Game ao Vivo ao sair da aba
+  // a varredura de disco continua no backend; só o poll da tela para
+  if (dest !== "manutencao:disco" && window.DISCO) DISCO.parar();
 }
 
-// navTo: navegação por nome lógico (deep-links de diagnóstico/limpeza).
+// navTo: navegação por nome lógico. É o contrato dos deep-links (diagnóstico,
+// plano da sessão, gargalos com `pagina:x`) — os nomes NÃO mudam quando as telas
+// são reorganizadas; só o destino deles muda aqui.
 function navTo(target) {
-  const map = { limpeza: ["manutencao", "limpeza"], inicializacao: ["manutencao", "inicializacao"], desempenho: ["medicao", "desempenho"], fps: ["medicao", "fps"], benchmark: ["medicao", "benchmark"] };
-  if (map[target]) showSub(map[target][0], map[target][1]); else showPage(target);
+  const map = {
+    limpeza: "manutencao:limpeza", inicializacao: "manutencao:inicializacao",
+    desempenho: "medicao:desempenho", fps: "medicao:fps", benchmark: "medicao:benchmark",
+  };
+  const alvo = ONDE[map[target] || target];
+  if (alvo && alvo.aba) return irAba(alvo.no.id, alvo.aba.id);
+  if (alvo && alvo.no) return irNo(alvo.no.id);
+  showPage(target); // nome fora do mapa: cai no roteador antigo
 }
 
 /* ---- Inicialização ------------------------------------------------------- */
@@ -967,6 +1105,7 @@ function addCustomGame() {
     return toast("info", "Jogo já adicionado", nome);
   }
   state.customJogos.push({ nome, loja: "Manual", pasta, exe, fso: false, gpu: false, prio: false, av: false });
+  try { localStorage.setItem("tz_custom_jogos", JSON.stringify(state.customJogos)); } catch (e) {} // persiste entre sessoes
   exeInput.value = ""; if (nameInput) nameInput.value = "";
   renderJogos();
   toast("ok", "Jogo adicionado", nome + " — configure os tweaks abaixo.");
@@ -1073,11 +1212,24 @@ function bkRestore(id) {
   });
 }
 async function bkDelete(id) {
-  try { await api("/api/backup/excluir", { id }); openBackup(); toast("info", "Backup excluído", ""); }
-  catch (e) { toast("err", "Falha", e.message); }
+  // Confirma: o "✕" fica colado no "Restaurar"; um clique errado apagava a rede de
+  // segurança do cliente sem volta.
+  confirmModal({
+    title: "Excluir este backup?",
+    body: "<p>Apaga permanentemente este ponto de restauração do PC. Esta ação <b>não pode ser desfeita</b>.</p>",
+    okLabel: "Excluir", danger: true,
+    onOk: async () => {
+      try { await api("/api/backup/excluir", { id }); openBackup(); toast("info", "Backup excluído", ""); }
+      catch (e) { toast("err", "Falha", e.message); }
+    }
+  });
 }
 
 async function openReport() {
+  // Se há sessão aberta, ela manda: o nome do cliente já foi dito uma vez e o
+  // relatório ganha o bloco do atendimento (o que foi feito, o que não foi e por quê).
+  const sesHTML = (window.SESSAO && SESSAO.atual()) ? SESSAO.relatorioHTML() : "";
+  if (window.SESSAO && SESSAO.cliente() && !$("#reportClient").value) $("#reportClient").value = SESSAO.cliente();
   let hist = []; try { hist = await api("/api/historico"); } catch (e) {}
   const applied = []; (hist || []).forEach((b) => b.rules.forEach((r) => applied.push(r.titulo)));
   const scan = state.scan || {}, tot = scan.totais || {}, p = scan.perfil || {};
@@ -1098,7 +1250,7 @@ async function openReport() {
         ${fpsB ? `<div class="col"><span>FPS antes</span><b>${fpsB.fps_avg}</b></div><div class="arrow">→</div>` : ""}
         <div class="col"><span>FPS médio</span><b style="color:#1a9e6b">${fps.fps_avg}</b></div>
         <div class="col"><span>1% low</span><b>${fps.low1}</b></div>
-        <div class="col"><span>0.1% low</span><b>${fps.low01}</b></div>
+        ${fps.low01 ? `<div class="col"><span>0.1% low</span><b>${fps.low01}</b></div>` : ""}
         ${ganho != null ? `<div class="col" style="margin-left:auto;text-align:right"><span>Ganho</span><b style="color:#1a9e6b">${ganho > 0 ? "+" : ""}${ganho}%</b></div>` : ""}
       </div>`;
   }
@@ -1122,6 +1274,7 @@ async function openReport() {
     <div class="r-head"><img src="logo.png" alt=""><div><h1>Relatório de Otimização</h1><div class="r-sub">ThazzDraco PC FPS Boost${cliente ? " · Cliente: " + escHtml(cliente) : ""} · ${data}</div></div>${state.clientLogo ? `<img src="${state.clientLogo}" class="r-clientlogo" alt="">` : ""}</div>
     <div class="r-score"><div class="col"><span>Score antes</span><b style="color:${scoreHex(antes)}">${antes}</b></div><div class="arrow">→</div><div class="col"><span>Score depois</span><b style="color:${scoreHex(depois)}">${depois}</b></div>
       <div class="col" style="margin-left:auto;text-align:right"><span>Otimizações</span><b style="color:#1a9e6b">${applied.length}</b></div></div>
+    ${sesHTML}
     ${fpsBlock}
     ${perfBlock}
     <h2>Computador</h2>
@@ -1282,7 +1435,11 @@ async function applyIds(ids, origem, msg) {
       afterMutation(data);
       const rep = data.relatorio || {}, n = (rep.aplicadas || []).length;
       const erros = Object.values(rep.erros || {});
-      const negado = erros.some((m) => /denied|negad|acesso/i.test(m || ""));
+      // so culpamos falta de admin quando o backend CONFIRMA que nao esta elevado
+      // (state.admin vem de winutil.IsAdmin() no boot) — senao um erro qualquer com
+      // "acesso/negado" (ex.: processo protegido, chave do TrustedInstaller) mentia
+      // "precisa de admin" pra quem ja roda elevado.
+      const negado = !state.admin && erros.some((m) => /denied|negad|acesso/i.test(m || ""));
       if (rep.limpeza_mb) toast("ok", `Limpeza concluída`, `${fmtMB(rep.limpeza_mb)} liberados.`);
       else if (n) toast("ok", `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}`, rep.restore_point ? "Ponto de restauração criado." : "");
       else if (!erros.length) toast("info", "Nada a aplicar", nadaAplicarMotivo(rep.puladas));
@@ -1317,9 +1474,12 @@ async function applyGreens() {
   busy(true, "Otimizando (seguros)…");
   try { const d = await api("/api/aplicar-verdes", { confirmar: false }); afterMutation(d);
     const rep = d.relatorio || {}, n = (rep.aplicadas || []).length;
-    const negado = Object.values(rep.erros || {}).some((m) => /denied|negad|acesso/i.test(m || ""));
-    toast(n ? "ok" : "info", n ? `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}` : "Nada novo aplicado", n ? "Ganhos seguros ativados." : "");
-    if (negado) adminWarn();
+    const erros = Object.values(rep.erros || {});
+    const negado = !state.admin && erros.some((m) => /denied|negad|acesso/i.test(m || ""));
+    if (negado) { adminWarn(); }
+    else if (n) toast("ok", `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}`, "Ganhos seguros ativados.");
+    else if (erros.length) toast("err", "Alguns itens falharam", erros[0]);
+    else toast("info", "Nada novo aplicado", "");
   } catch (e) { toast("err", "Falha", e.message); } finally { busy(false); }
 }
 function optimizeSection() {
@@ -1328,7 +1488,12 @@ function optimizeSection() {
 }
 async function undo(opts, label) {
   busy(true, "Desfazendo…");
-  try { afterMutation(await api("/api/desfazer", opts)); if (state.page === "historico") renderHistorico(); toast("ok", label || "Desfeito", "Restaurado."); }
+  try {
+    afterMutation(await api("/api/desfazer", opts));
+    if (opts && opts.tudo) $("#reboot")?.classList.remove("show"); // banner nao fica preso apos "Desfazer tudo"
+    if (state.page === "historico") renderHistorico();
+    toast("ok", label || "Desfeito", "Restaurado.");
+  }
   catch (e) { toast("err", "Falha ao desfazer", e.message); } finally { busy(false); }
 }
 
@@ -1348,10 +1513,8 @@ function closeModal() { $("#modal").classList.remove("show"); }
 
 /* ---- Eventos ------------------------------------------------------------- */
 function wire() {
-  $("#mainnav").onclick = (e) => { const a = e.target.closest("[data-page]"); if (a) showPage(a.dataset.page); };
-  $("#subManut").onclick = (e) => { const b = e.target.closest("[data-sub]"); if (b) showSub("manutencao", b.dataset.sub); };
-  $("#subMed").onclick = (e) => { const b = e.target.closest("[data-sub]"); if (b) showSub("medicao", b.dataset.sub); };
-  $("#btnHist").onclick = () => showPage("historico");
+  $("#mainnav").onclick = (e) => { const a = e.target.closest("[data-no]"); if (a) irNo(a.dataset.no); };
+  $("#subGlobal").onclick = (e) => { const b = e.target.closest("[data-aba]"); if (b) irAba(b.dataset.no, b.dataset.aba); };
   $("#btnRescan").onclick = () => doScan();
   $("#btnUpdatePanel").onclick = () => openUpdatePanel();
   // F5: limpar histórico de performance
@@ -1436,6 +1599,8 @@ function wire() {
   // F1: Modo Game ao Vivo — toggle
   const lgbToggle = $("#lgbToggle");
   if (lgbToggle) lgbToggle.onclick = async () => {
+    if (lgbToggle.dataset.busy) return; // guarda contra duplo clique (dessincronizava UI×backend)
+    lgbToggle.dataset.busy = "1";
     const isOn = lgbToggle.classList.contains("on");
     try {
       await api("/api/modo-game/set", { ativo: !isOn });
@@ -1443,6 +1608,7 @@ function wire() {
       updateLiveGameBar(!isOn, []);
       if (!isOn) startLiveGamePoll(); else stopLiveGamePoll();
     } catch (e) { toast("err", "Falha", e.message); }
+    finally { delete lgbToggle.dataset.busy; }
   };
   $("#search").oninput = debounce((e) => { state.query = e.target.value.trim(); renderOtimRules(); }, 250);
   $("#btnUndoAll").onclick = () => confirmModal({ title: "Desfazer tudo?", body: "Reverte todas as otimizações aplicadas, restaurando os valores anteriores.", okLabel: "Desfazer tudo", danger: true, onOk: () => undo({ tudo: true }, "Tudo desfeito") });
@@ -1512,7 +1678,7 @@ async function renderGpu() {
     liveBox.innerHTML = `<div class="bench-grid gpu-live-grid">${gpus.map(g => `<div class="bench-card">
       <div class="bench-h">${escHtml(g.nome || "GPU")}</div>
       <div class="bench-v">${g.uso_pct ?? "—"}<span>%</span></div>
-      <div class="bench-hint">Temp ${g.temp_c != null ? g.temp_c + "°C" : "N/D"} · VRAM ${g.vram_usada_mb != null ? (Math.round(g.vram_usada_mb / 102.4) / 10).toFixed(1) + " GB" : "N/D"}</div>
+      <div class="bench-hint">Temp ${g.temp_c > 0 ? g.temp_c + "°C" : "N/D"} · VRAM ${g.vram_tot_mb > 0 ? (g.vram_tot_mb / 1024).toFixed(1) + " GB" : "N/D"}</div>
     </div>`).join("") || `<div class="empty">${IC("gpu")}<div>Nenhuma GPU detectada nas métricas.</div></div>`}</div>`;
   } catch (e) { if (liveBox) liveBox.innerHTML = ""; }
   // 2. Painel NVIDIA
@@ -1804,7 +1970,8 @@ function renderFps() {
     </div>`;
   }
 
-  const cards = FPS_METRICS.filter((m) => m.key !== "fps_avg").map((m) => {
+  // Oculta o card "0.1% low" quando não há lastro (poucos quadros → backend manda 0).
+  const cards = FPS_METRICS.filter((m) => m.key !== "fps_avg" && !(m.key === "low01" && !r.low01)).map((m) => {
     const v = r[m.key] || 0, bv = base ? (base[m.key] || 0) : null;
     let delta = "";
     if (bv != null && bv > 0) {
@@ -1870,8 +2037,19 @@ async function runFps() {
 
 function pollFps() {
   const run = $("#fpsRun");
+  let fails = 0;
   const tick = async () => {
-    let st; try { st = await api("/api/fps/status"); } catch (e) { return; }
+    let st;
+    try { st = await api("/api/fps/status"); fails = 0; }
+    catch (e) {
+      // 3 falhas seguidas (~1,5s) = o núcleo caiu; destrava em vez de girar pra sempre.
+      if (++fails >= 3) {
+        clearInterval(state.fpsPoll); state.fpsPoll = null;
+        const btn = $("#btnFps"); if (btn) btn.disabled = false;
+        if (run) run.innerHTML = `<div class="bench-done err">${IC("err")}<div>Perdi contato com o núcleo durante a captura. Tente de novo.</div></div>`;
+      }
+      return;
+    }
     if (st.estado === "capturando") {
       if (st.processando) run.innerHTML = `<div class="bench-running">${IC("ring")}<div>Processando os quadros…</div></div>`;
       else {
@@ -1964,14 +2142,14 @@ async function renderDriver() {
       ${nvBtn}</div>`;
   }).join("");
   const resid = d.residuos
-    ? `<button class="btnG drv-clean" data-drvclean="${escHtml(d.residuos.pasta)}"><span data-icon="broom"></span> Limpar resíduos (${d.residuos.mb} MB)</button>`
+    ? `<button class="btnG drv-clean" data-drvclean="${escHtml(d.residuos.pasta)}">${IC("broom")} Limpar resíduos (${d.residuos.mb} MB)</button>`
     : "";
   const temNvidia = gpus.some((g) => g.vendor === "NVIDIA"), temAmd = gpus.some((g) => g.vendor === "AMD");
   const guiaBtn = (temNvidia || temAmd)
-    ? `<button class="btnG drv-settings" id="btnGpuSettings"><span data-icon="bolt"></span> Ajustes do painel</button>` : "";
+    ? `<button class="btnG drv-settings" id="btnGpuSettings">${IC("bolt")} Ajustes do painel</button>` : "";
   box.innerHTML = `<div class="drv-card">
     <div class="drv-head">${IC("gpu")}<h3>Driver de GPU</h3>
-      <button class="btnG drv-guide" id="btnDrvGuide"><span data-icon="guide"></span> Guia: instalar limpo</button>${guiaBtn}${resid}</div>
+      <button class="btnG drv-guide" id="btnDrvGuide">${IC("guide")} Guia: instalar limpo</button>${guiaBtn}${resid}</div>
     ${rows}
     <div class="drv-note">Mostramos a versão e a data reais aqui, sem cobrar atualização. Pra buscar atualização de verdade (qualquer driver, não só GPU), use a <b>Auditoria de Drivers</b> em Manutenção → Ferramentas.</div>
   </div>`;
@@ -2062,7 +2240,7 @@ function renderDiag() {
   $("#diagList").innerHTML = (d.gargalos || []).map((g) => {
     const s = SEV[g.severidade] || SEV.info;
     let action = "";
-    if (g.acao && g.acao.startsWith("regra:")) action = `<button class="btnG diag-fix" data-diagfix="${g.acao.slice(6)}"><span data-icon="bolt"></span> Corrigir agora</button>`;
+    if (g.acao && g.acao.startsWith("regra:")) action = `<button class="btnG diag-fix" data-diagfix="${g.acao.slice(6)}">${IC("bolt")} Corrigir agora</button>`;
     else if (g.acao && g.acao.startsWith("pagina:")) { const pg = g.acao.slice(7), lbl = { limpeza: "Limpeza", inicializacao: "Inicialização", jogos: "Jogos", desempenho: "Desempenho" }[pg] || pg; action = `<button class="btnG diag-go" data-diagpage="${pg}">Abrir ${escHtml(lbl)}</button>`; }
     const corr = g.severidade === "bom" ? "" :
       `<div class="diag-fixbox">${IC(g.acao === "manual" ? "guide" : "ok")}<div><b>Como resolver:</b> ${escHtml(g.correcao)}</div></div>`;
@@ -2864,9 +3042,11 @@ async function renderCustomPresets() {
           onOk: async () => {
             busy(true, "Aplicando preset…");
             try {
-              const r = await api("/api/presets/custom/aplicar", { id: btn.dataset.cpApply });
+              // confirmar:true = o clique no "Aplicar" deste modal é o consentimento
+              // (o backend agora respeita isso; sem ele, regras de risco eram puladas).
+              const r = await api("/api/presets/custom/aplicar", { id: btn.dataset.cpApply, confirmar: true });
               if (r.relatorio) {
-                const n = r.relatorio.aplicados || 0;
+                const n = (r.relatorio.aplicadas || []).length;
                 toast("ok", "Preset aplicado", `${n} ${pluralWord(n, "regra ativada", "regras ativadas")}.`);
                 if (r.scan) { ingest(r.scan); }
               } else toast("err", "Falha", r.erro || "");
@@ -3125,6 +3305,7 @@ const DRV_ST = { ok: { col: "var(--green)", lbl: "OK" }, antigo: { col: "var(--a
 async function runDriverAudit() {
   const btn = $("#btnDriverAudit"), box = $("#drvList"), sum = $("#drvSummary");
   if (!box) return;
+  if (state.drvAuditPoll) return; // já tem uma checagem rodando — evita disparo duplo
   if (btn) btn.disabled = true;
   box.innerHTML = `<div class="empty">${IC("ring")}<div>Lendo drivers instalados…</div></div>`;
   let drivers;
@@ -3135,31 +3316,39 @@ async function runDriverAudit() {
     if (btn) btn.disabled = false;
     return;
   }
-  if (btn) btn.disabled = false;
-  if (!drivers.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum driver encontrado.</div></div>`; if (sum) sum.textContent = ""; return; }
+  if (!drivers.length) { box.innerHTML = `<div class="empty">${IC("ok")}<div>Nenhum driver encontrado.</div></div>`; if (sum) sum.textContent = ""; if (btn) btn.disabled = false; return; }
 
   renderDriverAuditRows(drivers, null); // null = ainda não checou atualização real
   if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · verificando atualizações reais…`;
 
   // Dispara a checagem real (Windows Update) em paralelo, sem travar a lista que já apareceu.
+  // O botão só é reabilitado quando a checagem WUA termina (ver pollDriverAuditWua).
   try {
     const r = await api("/api/drivers/wua/buscar", {});
     if (!r.ok) throw new Error(r.erro || "falha ao iniciar checagem");
     pollDriverAuditWua(drivers);
   } catch (e) {
     if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · não consegui checar atualizações agora (${e.message}).`;
+    if (btn) btn.disabled = false;
   }
 }
 
 function pollDriverAuditWua(drivers) {
-  const poll = setInterval(async () => {
+  let ticks = 0;
+  const finish = () => {
+    clearInterval(state.drvAuditPoll); state.drvAuditPoll = null;
+    const btn = $("#btnDriverAudit"); if (btn) btn.disabled = false;
+  };
+  state.drvAuditPoll = setInterval(async () => {
+    // Teto de ~4min (o backend tem watchdog de 8min; isto destrava a UI antes).
+    if (++ticks > 120) { finish(); const sum = $("#drvSummary"); if (sum) sum.textContent = `${drivers.length} driver(s) · a checagem demorou demais e foi interrompida.`; return; }
     try {
       const st = await api("/api/drivers/wua/status");
       if (st.estado === "pronto") {
-        clearInterval(poll);
+        finish();
         renderDriverAuditRows(drivers, st.updates || []);
       } else if (st.estado === "erro") {
-        clearInterval(poll);
+        finish();
         const sum = $("#drvSummary");
         if (sum) sum.textContent = `${drivers.length} driver${drivers.length === 1 ? "" : "s"} · falha ao checar atualizações (${st.erro || ""}).`;
       }
@@ -3231,6 +3420,7 @@ function installSingleDriverUpdate(btn) {
     body: `<p>Baixa e instala pelo Windows Update — o mecanismo oficial. <b>A tela pode piscar por alguns segundos</b> durante a troca (normal em driver de GPU/rede). Evite fazer isso no meio de uma sessão remota crítica.</p>`,
     okLabel: "Instalar",
     onOk: async () => {
+      if (state.drvInstallPoll) { toast("warn", "Aguarde", "Já há uma instalação de driver em andamento."); return; }
       btn.disabled = true; btn.textContent = "Instalando…";
       try {
         const r = await api("/api/drivers/wua/instalar", { ids: [id] });
@@ -3242,15 +3432,18 @@ function installSingleDriverUpdate(btn) {
 }
 
 function pollSingleDriverInstall(btn, nome) {
-  const poll = setInterval(async () => {
+  let ticks = 0;
+  const stop = () => { clearInterval(state.drvInstallPoll); state.drvInstallPoll = null; };
+  state.drvInstallPoll = setInterval(async () => {
+    if (++ticks > 600) { stop(); btn.disabled = false; btn.textContent = "Tentar de novo"; toast("warn", "Instalação demorou demais", nome); return; }
     try {
       const st = await api("/api/drivers/wua/status");
       if (st.estado === "concluido") {
-        clearInterval(poll);
+        stop();
         btn.outerHTML = `<span class="drv-badge" style="color:var(--green)">Instalado${st.reboot_necessario ? " · reinicie" : ""}</span>`;
         toast("ok", "Driver instalado", nome + (st.reboot_necessario ? " — reinicie pra concluir." : ""));
       } else if (st.estado === "erro") {
-        clearInterval(poll);
+        stop();
         btn.disabled = false; btn.textContent = "Tentar de novo";
         toast("err", "Falha na instalação", st.erro || "");
       }
@@ -3368,9 +3561,12 @@ function applyPreset(id) {
         const data = await api("/api/aplicar-preset", { preset_id: id, confirmar: true });
         afterMutation(data);
         const rep = data.relatorio || {}, n = (rep.aplicadas || []).length;
-        const negado = Object.values(rep.erros || {}).some((m) => /denied|negad|acesso/i.test(m || ""));
-        toast(n ? "ok" : "info", `Perfil ${p.nome}`, n ? `${n} ajuste(s) aplicados.` : (negado ? "Precisa de administrador." : "Já estava tudo aplicado."));
-        if (negado) adminWarn();
+        const erros = Object.values(rep.erros || {});
+        const negado = !state.admin && erros.some((m) => /denied|negad|acesso/i.test(m || ""));
+        if (negado) { adminWarn(); toast("err", `Perfil ${p.nome}`, "Precisa de administrador."); }
+        else if (n) toast("ok", `Perfil ${p.nome}`, `${n} ajuste(s) aplicados.`);
+        else if (erros.length) toast("err", `Perfil ${p.nome}`, erros[0]);
+        else toast("info", `Perfil ${p.nome}`, "Já estava tudo aplicado.");
       } catch (e) { toast("err", "Falha ao aplicar perfil", e.message); } finally { busy(false); }
     },
   });
@@ -3411,7 +3607,10 @@ function openUpdatePanel() {
 function closeUpdatePanel() {
   $("#updPanel")?.classList.remove("open");
   $("#updPanelBg")?.classList.remove("open");
-  if (state.updatePoll) { clearInterval(state.updatePoll); state.updatePoll = null; }
+  // NÃO cancela o poll de update: se um download/instalação está em curso, ele
+  // precisa continuar para disparar /api/update/apply quando ficar pronto. Fechar
+  // o painel antes matava o apply silenciosamente. O poll se encerra sozinho ao
+  // concluir (os updates de DOM já são guardados por `if (bar)`/`if (txt)`).
 }
 
 function renderUpdatePanel() {
@@ -3541,12 +3740,15 @@ function scheduleUpdateCheck() {
 }
 
 async function boot() {
+  // jogos adicionados manualmente persistem entre sessões (os tweaks aplicados já
+  // ficavam no backend por exe; a lista, não).
+  try { const cj = localStorage.getItem("tz_custom_jogos"); if (cj) state.customJogos = JSON.parse(cj) || []; } catch (e) {}
   // #5 modo performance: respeita a escolha salva; senão auto-detecta PC fraco.
   let perfSaved = null; try { perfSaved = localStorage.getItem("tz_perf"); } catch (e) {}
   const perfAuto = (navigator.hardwareConcurrency || 8) <= 2 || matchMedia("(prefers-reduced-motion: reduce)").matches;
   setPerf(perfSaved !== null ? perfSaved === "1" : perfAuto);
 
-  buildGauge(); spawnParticles(); wire();
+  buildGauge(); spawnParticles(); renderNav(); wire(); sincronizaNav();
   // C4: SSE heartbeat — substitui polling /api/ping; sobrevive a throttling de aba
   // inativa porque é uma conexão persistente, não um timer. Reconecta se cair.
   (function hb() {

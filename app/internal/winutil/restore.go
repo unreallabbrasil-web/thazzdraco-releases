@@ -51,6 +51,7 @@ func CreateRestorePoint(description string) error {
 	desc := windows.StringToUTF16(description)
 	if len(desc) > len(info.Description) {
 		desc = desc[:len(info.Description)]
+		desc[len(desc)-1] = 0 // garante o terminador NUL dentro do buffer (szDescription exige)
 	}
 	copy(info.Description[:], desc)
 

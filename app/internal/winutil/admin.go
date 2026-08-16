@@ -27,7 +27,16 @@ func RelaunchElevated() error {
 		return err
 	}
 	cwd, _ := os.Getwd()
-	args := strings.Join(os.Args[1:], " ")
+	// Re-quota argumentos com espaço/aspas — o join simples quebrava flags com
+	// espaço ao repassar para o ShellExecute.
+	var qargs []string
+	for _, a := range os.Args[1:] {
+		if strings.ContainsAny(a, " \t\"") {
+			a = `"` + strings.ReplaceAll(a, `"`, `\"`) + `"`
+		}
+		qargs = append(qargs, a)
+	}
+	args := strings.Join(qargs, " ")
 
 	verbPtr, _ := windows.UTF16PtrFromString("runas")
 	exePtr, _ := windows.UTF16PtrFromString(exe)

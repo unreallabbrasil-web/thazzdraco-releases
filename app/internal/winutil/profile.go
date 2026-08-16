@@ -23,18 +23,17 @@ import (
 //   - discos ............ IOCTL_STORAGE_QUERY_PROPERTY (seek penalty => SSD/HDD)
 //   - dns ............... GetAdaptersAddresses
 func BuildProfile() map[string]any {
-	tipo := "desktop"
-	naBateria := false
-	if temBateria, emBateria, ok := powerStatus(); ok {
-		if temBateria {
-			tipo = "notebook"
-		}
-		naBateria = emBateria
-	}
-
+	// O tipo vem do CHASSI SMBIOS (sinal autoritativo), não da mera presença de
+	// bateria: um nobreak/UPS USB reporta bateria num desktop e o classificava como
+	// notebook, ativando gates errados (ex.: "não mexer em energia na bateria").
 	ramRated, ramConfigured, chassisLaptop := smbiosInfo()
+	tipo := "desktop"
 	if chassisLaptop {
 		tipo = "notebook"
+	}
+	naBateria := false
+	if _, emBateria, ok := powerStatus(); ok {
+		naBateria = emBateria && chassisLaptop // "na bateria" só faz sentido em notebook
 	}
 
 	ramTotalGB := totalRAMGB()
@@ -174,15 +173,18 @@ func smbiosInfo() (int, int, bool) {
 
 		switch stype {
 		case 17: // Memory Device
+			// 0xFFFF = velocidade DESCONHECIDA (spec SMBIOS). Sem esse filtro, um
+			// firmware que reporte 0xFFFF viraria "65535 MHz" e o diagnóstico
+			// mandaria "ative o XMP para subir a 65535 MHz" — dado inventado.
 			if slen > 0x16 {
 				sp := int(u16(formatted, 0x15))
-				if sp > 0 && sp > rated {
+				if sp > 0 && sp != 0xFFFF && sp > rated {
 					rated = sp
 				}
 			}
 			if slen > 0x21 {
 				cs := int(u16(formatted, 0x20))
-				if cs > 0 && cs > configured {
+				if cs > 0 && cs != 0xFFFF && cs > configured {
 					configured = cs
 				}
 			}
@@ -256,6 +258,19 @@ type devmodeW struct {
 
 const enumCurrentSettings = 0xFFFFFFFF // ENUM_CURRENT_SETTINGS
 
+// DisplayModo devolve o modo de video atual: largura, altura e Hz. Serve para
+// carimbar o CENARIO de uma medicao — comparar FPS medido em 1080p com FPS
+// medido em 1440p nao e comparacao, e ilusao.
+func DisplayModo() (largura, altura, hz int) {
+	var cur devmodeW
+	cur.Size = uint16(unsafe.Sizeof(cur))
+	r1, _, _ := procEnumDisplay.Call(0, uintptr(enumCurrentSettings), uintptr(unsafe.Pointer(&cur)))
+	if r1 == 0 {
+		return 0, 0, 0
+	}
+	return int(cur.PelsWidth), int(cur.PelsHeight), int(cur.DisplayFrequency)
+}
+
 // displayRefresh -> (atualHz, maxHzParaAResolucaoAtual).
 func displayRefresh() (int, int) {
 	var cur devmodeW
@@ -315,10 +330,7 @@ func diskTypes() []map[string]any {
 		path := fmt.Sprintf(`\\.\PhysicalDrive%d`, n)
 		t, ok := seekPenalty(path)
 		if !ok {
-			if n == 0 {
-				continue // primeiro indice pode falhar; tenta os proximos
-			}
-			break
+			continue // disco ausente NESTE indice; numeros nao sao contiguos (RAID/USB removido)
 		}
 		disco := map[string]any{"tipo": t, "midia": t, "numero": n, "sistema": n == sysDisk}
 		// O disco do sistema vai para o indice 0 (gates de SSD usam discos[0]).
@@ -385,7 +397,11 @@ func seekPenalty(path string) (string, bool) {
 		(*byte)(unsafe.Pointer(&d)), uint32(unsafe.Sizeof(d)),
 		&bytesReturned, nil)
 	if err != nil {
-		return "HDD", true // sem info de seek penalty: assume HDD (conservador)
+		// Disco existe (o CreateFile acima funcionou) mas a query de seek penalty
+		// falhou (comum em NVMe atrás de RAID/Intel RST ou SSD USB). NÃO assumir
+		// "HDD" — isso gerava "mova o jogo para um SSD" num jogo já em SSD. Media
+		// desconhecida: a enumeração continua e o diagnóstico não acusa HDD.
+		return "Desconhecido", true
 	}
 	if d.IncursSeekPenalty == 0 {
 		return "SSD", true

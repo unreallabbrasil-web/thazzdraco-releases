@@ -4,9 +4,13 @@
 package server
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,17 +27,23 @@ import (
 	"thazzdraco/internal/winutil"
 )
 
+// sessionCookie é o nome do cookie que porta o token de sessão da janela.
+const sessionCookie = "tz_session"
+
 type Server struct {
 	rules   []engine.Rule
 	presets []engine.Preset
 	web     http.Handler
 	version string
+	token   string // segredo por-sessão exigido em todo /api/ (gerado no boot)
 
-	mu       sync.Mutex // serializa operacoes do motor (scan/apply/registro)
-	opMu     sync.Mutex // serializa operacoes destrutivas pesadas (debloat/limpeza/driver)
-	lastPing time.Time
-	pingMu   sync.Mutex
-	inFlight int32 // requisicoes em andamento — o watchdog nunca encerra com >0
+	mu        sync.Mutex // serializa operacoes do motor (scan/apply/registro)
+	opMu      sync.Mutex // serializa operacoes destrutivas pesadas (debloat/limpeza/driver)
+	lastPing  time.Time
+	pingMu    sync.Mutex
+	inFlight  int32 // requisicoes em andamento — o watchdog nunca encerra com >0
+	hbCount   int32 // conexoes SSE de heartbeat abertas (teto para nao travar o watchdog)
+	execAtiva int32 // 1 = uma fase do plano da sessao esta sendo executada agora
 
 	// F1: Modo Game ao Vivo
 	gameMu        sync.Mutex
@@ -49,8 +59,22 @@ func New(rules []engine.Rule, presets []engine.Preset, webFS fs.FS, version stri
 		presets:  presets,
 		web:      http.FileServer(http.FS(webFS)),
 		version:  version,
+		token:    newToken(),
 		lastPing: time.Now(),
 	}
+}
+
+// Token devolve o segredo de sessão (usado no modo -headless para testes via curl).
+func (s *Server) Token() string { return s.token }
+
+// newToken gera um segredo aleatório de 24 bytes (hex). Fica só em memória — não é
+// gravado em disco —, então um processo local sem privilégio não consegue lê-lo.
+func newToken() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("tz-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 // Handler devolve o roteador HTTP completo (API + arquivos estaticos).
@@ -141,8 +165,32 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/ferramentas/wu/status", s.handleWUStatus)
 	mux.HandleFunc("/api/ferramentas/wu/pausar", s.handleWUPausar)
 	mux.HandleFunc("/api/ferramentas/wu/retomar", s.handleWURetomar)
+	// Sessao (docs/SESSAO.md) — o trilho do atendimento. Fatia S1.
+	mux.HandleFunc("/api/sessao", s.handleSessaoAtual)
+	mux.HandleFunc("/api/sessao/nova", s.handleSessaoNova)
+	mux.HandleFunc("/api/sessao/retomar", s.handleSessaoRetomar)
+	mux.HandleFunc("/api/sessao/etapa", s.handleSessaoEtapa)
+	mux.HandleFunc("/api/sessao/encerrar", s.handleSessaoEncerrar)
+	mux.HandleFunc("/api/sessao/plano/gerar", s.handleSessaoPlanoGerar)
+	mux.HandleFunc("/api/sessao/plano/selecionar", s.handleSessaoPlanoSelecionar)
+	mux.HandleFunc("/api/sessao/plano/feito", s.handleSessaoPlanoFeito)
+	mux.HandleFunc("/api/sessao/aplicar", s.handleSessaoAplicar)
+	mux.HandleFunc("/api/sessao/status", s.handleSessaoStatus)
+	mux.HandleFunc("/api/sessao/medir", s.handleSessaoMedir)
+	mux.HandleFunc("/api/sessao/fps-pronto", s.handleSessaoFPSPronto)
+	mux.HandleFunc("/api/sessao/reiniciar", s.handleSessaoReiniciar)
+	mux.HandleFunc("/api/sessao/reboot-visto", s.handleSessaoRebootVisto)
+	// Explorador de disco — onde o espaço foi parar.
+	mux.HandleFunc("/api/disco/varrer", s.handleDiscoVarrer)
+	mux.HandleFunc("/api/disco/status", s.handleDiscoStatus)
+	mux.HandleFunc("/api/disco/cancelar", s.handleDiscoCancelar)
+	mux.HandleFunc("/api/disco/arvore", s.handleDiscoArvore)
+	mux.HandleFunc("/api/disco/achados", s.handleDiscoAchados)
+	mux.HandleFunc("/api/disco/abrir", s.handleDiscoAbrir)
+	mux.HandleFunc("/api/disco/limpar", s.handleDiscoLimpar)
+	mux.HandleFunc("/api/sessoes", s.handleSessoes)
 	mux.Handle("/", s.web)
-	return s.instrument(sameOriginGuard(mux))
+	return s.instrument(s.securityGuard(mux))
 }
 
 // instrument conta as requisicoes em andamento e marca atividade a CADA chamada.
@@ -165,13 +213,25 @@ func (s *Server) instrument(next http.Handler) http.Handler {
 // InFlight informa quantas requisicoes estao em andamento agora.
 func (s *Server) InFlight() int32 { return atomic.LoadInt32(&s.inFlight) }
 
-// sameOriginGuard bloqueia chamadas a /api/ vindas de OUTRA origem (um site
-// malicioso aberto no navegador do usuario nao pode disparar nossas operacoes,
-// mesmo descobrindo a porta). Baseia-se no Sec-Fetch-Site (que o JS nao consegue
-// forjar) e no Origin. Como o app roda elevado, isto fecha o vetor de CSRF.
-func sameOriginGuard(next http.Handler) http.Handler {
+// securityGuard protege a API local. O processo roda ELEVADO, então precisa
+// defender contra dois vetores distintos:
+//
+//  1. DNS rebinding: um site externo (evil.com) que rebinda para 127.0.0.1 e tenta
+//     falar com a porta. Fechado exigindo que o Host da requisição seja loopback —
+//     o Host de um site externo é o domínio dele, não 127.0.0.1.
+//  2. Escalonamento de privilégio local: outro processo do usuário (sem admin) que
+//     descobre a porta e POSTa direto para /api/. Um cliente HTTP não-navegador não
+//     manda Sec-Fetch-*, então o same-origin sozinho não barra. Fechado exigindo o
+//     token de sessão (cookie), que só a janela do app recebe e fica só em memória.
+//
+// O same-origin (Sec-Fetch/Origin) é mantido como defesa em profundidade contra CSRF.
+func (s *Server) securityGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if !isLoopbackHost(r.Host) {
+				http.Error(w, "host nao permitido", http.StatusForbidden)
+				return
+			}
 			if sfs := r.Header.Get("Sec-Fetch-Site"); sfs == "cross-site" || sfs == "same-site" {
 				http.Error(w, "origem nao permitida", http.StatusForbidden)
 				return
@@ -182,8 +242,64 @@ func sameOriginGuard(next http.Handler) http.Handler {
 					return
 				}
 			}
+			if !s.tokenOK(r) {
+				http.Error(w, "sessao nao autenticada", http.StatusForbidden)
+				return
+			}
+			// Teto de tamanho do corpo (4 MB): os decodes JSON dos handlers não tinham
+			// limite — um corpo gigante consumia memória arbitrária. 4 MB cobre com
+			// folga o maior payload real (importar lista de jogos).
+			r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
+		} else {
+			// Servindo HTML/estáticos para a janela: carimba o cookie de sessão a
+			// cada carga de página, garantindo que a janela sempre tenha o token
+			// atual (mesmo se o perfil isolado do Edge guardou um cookie antigo).
+			s.setSessionCookie(w)
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// isLoopbackHost aceita apenas Host de loopback (127.0.0.0/8, ::1 ou "localhost"),
+// com ou sem porta. É o que fecha o DNS rebinding.
+func isLoopbackHost(host string) bool {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host // veio sem porta
+	}
+	h = strings.ToLower(strings.Trim(h, "[]"))
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// tokenOK confere o segredo de sessão. Aceita via cookie (a janela do app o recebe
+// e o navegador o reenvia sozinho em fetch/EventSource) ou via header X-TZ-Token
+// (conveniência para testes com curl no modo -headless). Comparação em tempo
+// constante para não vazar o token por timing.
+func (s *Server) tokenOK(r *http.Request) bool {
+	if h := r.Header.Get("X-TZ-Token"); h != "" {
+		return subtle.ConstantTimeCompare([]byte(h), []byte(s.token)) == 1
+	}
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.token)) == 1
+}
+
+// setSessionCookie carimba o cookie de sessão. HttpOnly (o JS não precisa lê-lo) +
+// SameSite=Strict (não vaza para páginas de outra origem). Sem Secure porque o app
+// serve em http://127.0.0.1 (o navegador descartaria um cookie Secure em http).
+func (s *Server) setSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    s.token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
 	})
 }
 
@@ -231,6 +347,14 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)
 		return
 	}
+	// Teto de heartbeats simultâneos: a janela abre 1. Impede que conexões SSE
+	// acumuladas segurem inFlight>0 e neutralizem o watchdog (processo elevado órfão).
+	if atomic.AddInt32(&s.hbCount, 1) > 4 {
+		atomic.AddInt32(&s.hbCount, -1)
+		http.Error(w, "muitos heartbeats", http.StatusTooManyRequests)
+		return
+	}
+	defer atomic.AddInt32(&s.hbCount, -1)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -259,6 +383,13 @@ func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleRebuild(w http.ResponseWriter, _ *http.Request) {
+	// Endpoint de DESENVOLVIMENTO (roda CONSTRUIR.ps1). Fica desligado no binário
+	// distribuído — só responde quando TZ_DEV=1 no ambiente. Sem isso, um app
+	// elevado executando um .ps1 do diretório-pai é superfície de ataque.
+	if os.Getenv("TZ_DEV") != "1" {
+		writeJSON(w, 403, map[string]any{"ok": false, "erro": "rebuild desabilitado (modo de desenvolvimento)"})
+		return
+	}
 	// Localiza CONSTRUIR.ps1 dois níveis acima do executável
 	exe, err := os.Executable()
 	if err != nil {
@@ -481,7 +612,7 @@ func (s *Server) handleRepairStatus(w http.ResponseWriter, _ *http.Request) {
 
 // handleBloatList lista os apps de bloatware removiveis (catalogo seguro).
 func (s *Server) handleBloatList(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, winutil.ListBloat())
+	writeJSON(w, 200, winutil.ListBloat(winutil.RealUserSid()))
 }
 
 // handleDeepScan calcula o tamanho de cada categoria da limpeza profunda.
@@ -554,7 +685,7 @@ func (s *Server) handleBloatRemove(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	writeJSON(w, 200, winutil.RemoveBloat(req.Pacotes))
+	writeJSON(w, 200, winutil.RemoveBloat(winutil.RealUserSid(), req.Pacotes))
 }
 
 type driverCleanReq struct {
@@ -748,6 +879,12 @@ func (s *Server) handleServicoParar(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&req)
 	if req.Nome == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "erro": "nome vazio"})
+		return
+	}
+	// Allowlist: só para serviços da lista de candidatos não-essenciais. Fecha o
+	// vetor de parar um serviço arbitrário (anticheat, Defender) via o processo elevado.
+	if !winutil.IsHeavyServiceCandidate(req.Nome) {
+		writeJSON(w, 403, map[string]any{"ok": false, "erro": "serviço não está na lista permitida"})
 		return
 	}
 	err := winutil.StopServiceNow(req.Nome)
@@ -1054,7 +1191,10 @@ func (s *Server) handleCustomPresetExcluir(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleCustomPresetAplicar(w http.ResponseWriter, r *http.Request) {
-	var req customPresetExcluirReq
+	var req struct {
+		ID        string `json:"id"`
+		Confirmar bool   `json:"confirmar"`
+	}
 	json.NewDecoder(r.Body).Decode(&req)
 	sid := winutil.RealUserSid()
 	ids := winutil.GetCustomPresetIDs(sid, req.ID)
@@ -1065,18 +1205,27 @@ func (s *Server) handleCustomPresetAplicar(w http.ResponseWriter, r *http.Reques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ctx := engine.BuildCtx()
-	rep := engine.ApplyRules(s.rules, ids, ctx, true, "preset-custom:"+req.ID)
+	// Respeita o consentimento: regras de risco só entram com confirmar=true (antes
+	// era hardcoded true, o que burlava o consentimento em presets customizados).
+	rep := engine.ApplyRules(s.rules, ids, ctx, req.Confirmar, "preset-custom:"+req.ID)
 	writeJSON(w, 200, map[string]any{"relatorio": rep, "scan": engine.Scan(s.rules, ctx)})
 }
 
 // handleReboot reinicia o Windows (acionado pelo usuario, com confirmacao na UI).
 func (s *Server) handleReboot(w http.ResponseWriter, _ *http.Request) {
-	cmd := exec.Command("shutdown", "/r", "/t", "3")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	err := cmd.Start()
+	err := reiniciarWindows()
 	resp := map[string]any{"ok": err == nil}
 	if err != nil {
 		resp["erro"] = err.Error()
 	}
 	writeJSON(w, 200, resp)
+}
+
+// reiniciarWindows agenda o reinicio. Compartilhado com a sessao, que precisa
+// gravar a intencao antes de chamar — um caminho so para reiniciar significa um
+// comportamento so.
+func reiniciarWindows() error {
+	cmd := exec.Command("shutdown", "/r", "/t", "3")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	return cmd.Start()
 }
