@@ -102,7 +102,12 @@ if ($Simular) {
     Write-Host ""
     return
 }
-gh release create "v$Versao" $exe $sig --repo $repo --title "ThazzDraco Optimizer v$Versao" --notes $Notas
+# --target: sem isso a tag nasce apontando para a HEAD do branch padrao no
+# GitHub, que pode nao ter este codigo. A tag tem que apontar para o commit de
+# onde o binario saiu, senao daqui a um ano ninguem sabe o que foi publicado.
+$branch = (git rev-parse --abbrev-ref HEAD).Trim()
+gh release create "v$Versao" $exe $sig --repo $repo --target $branch `
+    --title "ThazzDraco Optimizer v$Versao" --notes $Notas
 if ($LASTEXITCODE -ne 0) { throw "gh release create falhou" }
 
 # --------------------------------------------------------------- 6. confirmar
