@@ -72,8 +72,12 @@ if (-not $Simular) {
     # cria a tag no HEAD que o GITHUB conhece — commit local que nao subiu nao
     # existe para ele, e a tag nasce um commit atras. Foi o que aconteceu na
     # v5.0.1 e de novo na v5.0.2, quando o script so commitava.
+    # SEM `2>&1` aqui: o git escreve o progresso do push em stderr, e no
+    # PowerShell 5.1 redirecionar stderr de executavel nativo vira
+    # NativeCommandError — com $ErrorActionPreference="Stop" isso ABORTA a
+    # publicacao no meio, com o VERSION ja gravado. Aconteceu na v5.0.3.
     $branchAtual = (git rev-parse --abbrev-ref HEAD).Trim()
-    git push origin $branchAtual 2>&1 | Out-Null
+    git push origin $branchAtual | Out-Null
     if ($LASTEXITCODE -eq 0) { Ok "VERSION commitado e enviado (a tag vai apontar para ele)" }
     else { Aviso "nao consegui enviar o commit - a tag vai apontar para o que ja esta no GitHub" }
 }
