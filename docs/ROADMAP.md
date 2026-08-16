@@ -94,6 +94,26 @@ restauração de backup honesta (conta só o que voltou), trava de servidor na l
 
 ---
 
+### Fase 6 — A Sessão: o atendimento vira procedimento (✅ concluída)
+
+O app deixou de ser um painel de telas paralelas e ganhou uma **espinha**: um trilho de 7 etapas
+(Medir · Ler · Entender · Planejar · Aplicar · Provar · Entregar) com estado durável. Desenho e
+detalhe de cada fatia em [SESSAO](SESSAO.md).
+
+- [x] **S1 — trilho + estado durável.** Fecha o app no meio, reabre e volta na etapa certa. Pular
+  exige motivo, e o motivo vai para o relatório.
+- [x] **S2 — a prova.** Medição de antes e depois com **cenário carimbado**; só compara mesmo jogo e
+  mesma resolução, senão diz "não comparável" e por quê. Ruído (<1%) aparece como "igual".
+- [x] **S3 — o plano.** Varredura + gargalos + perfil viram uma fila em 3 fases (aplica agora · pede
+  reinício · na mão), editável, com score projetado. Risco alto nunca vem marcado.
+- [x] **S5 — o executor.** Aplica a fase em um lote (um ponto de restauração, um undo) e **relê para
+  confirmar**: escrita que não persistiu vira "falhou com motivo", nunca ✓. Execução interrompida é
+  admitida como tal.
+- [x] **S6 — reinício e entrega.** A sessão atravessa o reboot (detecção por uptime, sem auto-start)
+  e o relatório do cliente ganha o bloco do atendimento — inclusive o que **não** foi feito.
+- [x] **S4 — dependências e conflitos entre regras.** `depende_de` / `conflita_com` no schema (1.1);
+  o plano ordena, bloqueia com motivo legível e garante que todo bloqueio tenha saída.
+
 ## Backlog de ideias (não priorizado)
 
 - Desinstalar bloatware OEM (com consentimento).

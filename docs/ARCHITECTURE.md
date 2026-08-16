@@ -14,13 +14,18 @@ web e as regras, sobe um servidor HTTP local e abre uma janela do navegador em m
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  UI  (web/ — HTML/CSS/JS, "DRACO // PORTAL", 100% offline)    │
-│  6 nós: Núcleo · Diagnóstico · Otimizações · Jogos ·          │
-│         Manutenção (sub-abas) · Medição (sub-abas)            │
+│  5 nós (ler → agir → registrar):                              │
+│  Núcleo · Sessão · Máquina · Ações · Registro                 │
 └───────────────┬──────────────────────────────────────────────┘
                 │  fetch JSON (localhost:porta-efêmera)
 ┌───────────────▼──────────────────────────────────────────────┐
 │  internal/server  — HTTP + API JSON + watchdog de janela      │
 └───────────────┬──────────────────────────────────────────────┘
+                │
+┌───────────────▼────────────────┐
+│  internal/sessao — trilho do    │  ordena o atendimento; guarda
+│  atendimento (7 etapas + estado)│  o estado em disco. Fica POR
+└───────────────┬────────────────┘  CIMA do motor, nunca dentro.
                 │
 ┌───────────────▼───────────────┐   ┌──────────────────────────┐
 │  internal/engine               │   │  internal/winutil        │
@@ -69,6 +74,7 @@ web e as regras, sobe um servidor HTTP local e abre uma janela do navegador em m
 | `gpu.go` | **GPU NVIDIA via NVML** (temp/uso/VRAM real); nome universal (EnumDisplayDevices); breakdown de memória (GetPerformanceInfo). AMD via ADL: a validar |
 | `startup.go` | inicialização: lista Run (HKCU/HKLM/Wow64) + pastas Startup; liga/desliga via `StartupApproved` |
 | `games.go` | detecta Steam (libraryfolders.vdf + appmanifest) e Epic (manifests); acha o exe principal; tweaks por jogo (FSO/GPU/IFEO) + exclusão do Defender |
+| `disco.go` | explorador de espaço: caminhada paralela com **fila limitada** (`sync.Cond`), tamanho somado por pasta + maiores arquivos; não segue junções |
 
 **Princípio:** nada de WMI/PowerShell. A **única** exceção é a exclusão do Defender
 (`Add/Remove-MpPreference`), porque não há API nativa limpa — e roda com janela oculta.
@@ -95,13 +101,43 @@ o start type; powercfg = restaura esquema + valores AC; inicialização = restau
 
 ---
 
+## 4.1 `internal/sessao` — o trilho do atendimento
+
+Camada **acima** do motor (importa `engine`/`winutil`, nunca o contrário). Dá ordem ao que antes eram
+telas soltas: 7 etapas (Medir · Ler · Entender · Planejar · Aplicar · Provar · Entregar), mais uma
+etapa 0 automática que confere elevação e decide se a sessão nasce completa ou **Limitada** (sem
+admin = só as etapas de leitura).
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `model.go` | Structs + catálogo de etapas + saneamento do texto vindo do usuário |
+| `maquina.go` | Transições: concluir, pular (com **motivo obrigatório**), encerrar |
+| `plano.go` | `GerarPlano` — **função pura**: varredura + gargalos + perfil → fila em 3 fases, com seleção padrão e score projetado |
+| `executor.go` | Máquina da execução: o que entra na fila, o julgamento de cada escrita (**`aplicado` só depois de reler**) e a reconciliação de execução órfã |
+| `evidencia.go` | Medições de antes/depois + **cenário**: só compara jogo e resolução idênticos; o resto vira motivo escrito |
+| `reboot.go` | Continuidade através do reinício: marca a intenção antes de reiniciar e reconhece a volta **pelo uptime** (sem auto-start) |
+| `store.go` | `sessoes\<id>.json` + ponteiro `sessao-atual.txt`, escrita atômica, id validado por regex |
+| `maquina_test.go` · `plano_test.go` | Testes da máquina de etapas e do planejador |
+
+**Não duplica a rede de segurança:** snapshot, undo e histórico continuam no `engine`. A sessão só
+guarda a ordem e o estado — o item aplicado guarda o `batch_id` que o liga ao lote do histórico.
+
+A execução de uma fase roda em goroutine (`internal/server/sessao_exec.go`) segurando `s.mu`, o mesmo
+cadeado de `/api/aplicar` — nunca há duas escritas simultâneas. `/api/sessao/status` é o único
+handler de sessão que **não** pega `s.mu`, porque precisa responder o poll enquanto a fase corre.
+
+Desenho completo e fatias seguintes em [SESSAO](SESSAO.md).
+
+---
+
 ## 5. `internal/server` — API JSON
 
 Endpoints principais: `/api/escanear`, `/api/aplicar`, `/api/aplicar-verdes`, `/api/aplicar-preset`,
 `/api/desfazer`, `/api/historico`, `/api/presets`, `/api/saude`, `/api/metricas`,
 `/api/inicializacao` (+`/set`), `/api/jogos` (+`/tweak`), `/api/backup/*`, `/api/reiniciar`,
 `/api/ping`, `/api/info`, além de `/api/diagnostico`, `/api/driver` (+`/limpar`), `/api/reparo/*`,
-`/api/debloat/*`, `/api/limpeza-profunda/*`, `/api/ferramentas/*`, `/api/fps/*`, `/api/benchmark`.
+`/api/debloat/*`, `/api/limpeza-profunda/*`, `/api/ferramentas/*`, `/api/fps/*`, `/api/benchmark` e
+`/api/sessao*` (trilho do atendimento — rotas que mudam estado exigem **POST**).
 Operações do motor são serializadas por `s.mu`; as destrutivas pesadas (debloat/limpeza/driver) por
 `s.opMu`. Um middleware (`instrument`) conta requisições em andamento (`inFlight`) e marca atividade a
 cada chamada — base do watchdog robusto. Guard de **origem** (`Sec-Fetch-Site`/`Origin`) fecha CSRF.
@@ -112,7 +148,13 @@ cada chamada — base do watchdog robusto. Guard de **origem** (`Sec-Fetch-Site`
 
 HTML/CSS/JS vanilla, **fontes nativas do Windows** (Bahnschrift/Consolas → 100% offline). Estética
 cinematográfica (portal rúnico + dragão + raios + atmosfera), navegação por **HUD de comando** no
-rodapé. `app.js` orquestra: roteamento, **cerimônia de scan** (varredura profunda animada), toggles,
+rodapé.
+
+**Navegação (5 nós).** A tabela `NOS` em `app.js` é a fonte única: monta o HUD, monta a barra de
+sub-abas e diz onde cada destino mora. É camada de apresentação — por baixo continuam `showPage`
+(página) e `showSub` (pane), e `navTo(nome-lógico)` é o contrato dos deep-links, que não muda quando
+as telas se movem. Uma aba pode empilhar panes irmãos (`extras`), que foi como *Limpar* e *Reparar*
+juntaram telas que faziam a mesma coisa. `app.js` orquestra: roteamento, **cerimônia de scan** (varredura profunda animada), toggles,
 modais (detalhes/consentimento/backup), relatório, modo performance, responsivo por altura. Ícones
 em `icons.js`. A varredura **não** é automática — o usuário clica em "Escanear PC".
 

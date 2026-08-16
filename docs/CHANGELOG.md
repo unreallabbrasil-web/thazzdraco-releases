@@ -4,6 +4,264 @@ Histórico de versões do ThazzDraco Optimizer. Formato baseado em *Keep a Chang
 
 ---
 
+## [Não lançado] — Disco: a limpeza (fatia L3, ago/2026)
+
+O explorador passou a **liberar espaço**, não só apontar. É o único código do app que apaga arquivo —
+e o único sem undo —, então a segurança está em três camadas independentes:
+
+1. **O cliente manda id de categoria, nunca caminho.** Não existe caminho de código em que um caminho
+   vindo da UI chegue à exclusão. Mandar `C:\Windows\System32` como id é recusado como categoria
+   desconhecida.
+2. **Só categoria da classe "limpável" executa.** `windows-installer`, `downloads` e `modelos-hf` são
+   recusados com o motivo mesmo com `confirmar: true`.
+3. **`podeApagar()` confere cada caminho na porta**, mesmo vindo do catálogo: recusa raiz de unidade,
+   caminho raso, `Windows\Installer`, `WinSxS`, `System32`, `Program Files`, `Package Cache`, pasta
+   pessoal, OneDrive/Dropbox, saves de jogo, caminho relativo e `..`.
+
+- **A exclusão não atravessa junção** — teste dedicado cria uma junção dentro do cache apontando para
+  fora e confirma que o arquivo de fora sobrevive.
+- **A pasta de cima é mantida**: só o conteúdo sai (o npm quebra se o `npm-cache` sumir inteiro).
+- **Arquivo em uso é mantido**, nunca forçado, e aparece no resultado como "em uso".
+- **Nada vem marcado** na tela: em algo sem undo, marcado por padrão não seria consentimento. O modal
+  lista as pastas exatas, os tamanhos e o aviso de que não há volta.
+- Tudo registrado em `operacoes.log`, e a tela varre de novo depois de apagar.
+- **10 testes novos** em `disco_limpeza_test.go`, incluindo a cadeia inteira num perfil falso
+  (`USERPROFILE` apontando para pasta temporária): apaga o cache certo, mantém a pasta e não encosta
+  em `Documents` nem na categoria vizinha.
+
+## [Não lançado] — Disco: duplicados grandes + testes de portabilidade (fatia L2, ago/2026)
+
+- **Duplicados confirmados por conteúdo, não por tamanho.** Arquivos ≥ 256 MB com o mesmo tamanho
+  são candidatos; a confirmação lê **1 MB do início e 1 MB do fim** de cada e compara o hash. A tela
+  diz exatamente isso — não é comparação byte a byte, e o texto não deixa ninguém achar que é.
+- **Continua sem apagar nada**, e o motivo apareceu no primeiro teste real: dos 23,5 GB em cópias
+  encontrados nesta máquina, a maioria são **mods de servidor de DayZ**, que existem no workshop da
+  Steam e na pasta do servidor **de propósito** — apagar uma cópia quebraria o servidor. A tela avisa
+  isso em destaque.
+- **Testes de portabilidade** (`internal/winutil/disco_test.go`), porque o app precisa dar o mesmo
+  número em qualquer máquina:
+  - **caminho > 260 caracteres** (o `node_modules` fundo que quebra varredor amador) — medido certo,
+    zero pasta perdida;
+  - **junção do Windows não é seguida** — senão a mesma pasta conta duas vezes ou a varredura entra
+    em laço;
+  - soma por pasta, ordenação dos maiores, consulta fora da raiz recusada;
+  - **o catálogo não pode oferecer apagar** `Windows\Installer`, `WinSxS`, `System32`, `pagefile`,
+    pasta pessoal — teste que quebra o build, não comentário;
+  - toda categoria precisa ter id único, nome, descrição e classe válida.
+
+## [Não lançado] — Disco: classificação do que ocupa espaço (fatia L1, ago/2026)
+
+O explorador saiu de "mostra pastas grandes" para "diz o que cada coisa é". Plano completo em
+[`docs/DISCO-LIMPEZA.md`](DISCO-LIMPEZA.md). **Esta fatia não apaga nada** — de propósito: a
+classificação é conferida antes de existir qualquer botão que exclua arquivo.
+
+- **Quatro classes**, e a diferença entre elas é o que o app *pode* fazer:
+  - **Dá para limpar** — cache regenerável (npm, pip, Go, Yarn, Gradle, Cargo, NuGet)
+  - **Já existe tela para isso** — shaders, temporários, cache do Update: atalho para a Limpeza
+    profunda em vez de fazer em dobro
+  - **Decisão sua** — modelos de IA, Downloads, dados de apps: o app mostra o tamanho e **não apaga**
+  - **Não mexo nisto** — o que parece lixo e quebra o sistema, com o motivo escrito
+- **Instaladores grandes em Downloads** listados com tamanho e há quantos dias estão parados —
+  relatório, pasta pessoal não se toca.
+- **`/api/disco/abrir`** abre a pasta no Explorer, e **só aceita caminho que a própria classificação
+  produziu** — caminho vindo do cliente é recusado.
+- O catálogo mora em Go, não em JSON: a lista de caminhos apagáveis é fronteira de segurança, e em Go
+  ela é compilada, revisável e testável.
+
+Medido nesta máquina (C: com 41,7 GB livres): **10,6 GB de cache limpável**, 35 GB de "decisão sua"
+(incluindo 27 GB de dados de apps da Store) e 35 GB de intocável — sendo **16,7 GB de WinSxS** e
+**2,6 GB de `C:\Windows\Installer`**, que é a armadilha clássica dos limpadores de PC.
+
+## [Não lançado] — Navegação reorganizada: de 8 nós para 5 (ago/2026)
+
+O app cresceu por acumulação e achar as coisas virou adivinhação: eram **8 nós + 10 sub-abas + 7
+botões no HUD** — umas 21 portas, várias fazendo a mesma coisa.
+
+A nova estrutura segue a lógica que a Sessão já provou — **ler → agir → registrar**:
+
+| Nó | O que vive lá |
+|---|---|
+| **Núcleo** | o portal: identidade, Boost Score e escanear |
+| **Sessão** | o caminho guiado, ponta a ponta |
+| **Máquina** | só **lê**: Diagnóstico · Desempenho · Disco · GPU · FPS no jogo · Benchmark |
+| **Ações** | **escreve**: Otimizações · Jogos · Limpar · Reparar · Inicialização |
+| **Registro** | o que já foi feito: histórico de lotes, performance, backup e relatório |
+
+- **Uma barra de sub-abas só**, montada a partir de uma tabela única (`NOS` em `app.js`) em vez de
+  duas barras fixas no HTML. O nó lembra em que aba você estava.
+- **Telas irmãs empilhadas**: *Limpar* reúne Limpeza + Limpeza profunda + Debloat + Browsers, que
+  eram quatro abas separadas fazendo a mesma coisa; *Reparar* reúne Reparo + Ferramentas.
+- **HUD enxugado de 7 para 4 botões**: Histórico, Backup e Relatório saíram dos ícones do topo e
+  viraram destinos de verdade dentro de **Registro**.
+- **Nenhuma tela foi reescrita.** A reorganização é camada de apresentação: por baixo continuam
+  valendo `showPage`/`showSub`, e os deep-links por nome lógico (`navTo("limpeza")`, gargalos com
+  `pagina:x`, o plano da Sessão) seguem funcionando — os nomes não mudam quando as telas se movem.
+
+## [Não lançado] — Explorador de disco: onde o espaço foi parar (ago/2026)
+
+O diagnóstico já dizia *"9% livre em C:"* e **não oferecia nada**. Agora oferece.
+
+- **Nova aba Manutenção → Disco.** Varre a unidade, soma o tamanho de cada pasta e mostra da maior
+  para a menor, com navegação por pasta (entrar/subir) e barra proporcional. Só lê — nada é apagado.
+- **Lista dos maiores arquivos** da unidade (200 guardados, 12 exibidos).
+- **Velocidade medida numa máquina real:** 428,9 GB · 1.785.210 arquivos · 315.516 pastas em **37s a
+  frio e 9,3s com o cache do Windows quente**. Pico de 182 MB de RAM.
+- **Honestidade na tela:** tamanho lógico (não alocado), junções e links **não** são seguidos (senão a
+  mesma pasta contaria duas vezes), e o rodapé mostra quantas pastas o Windows recusou ler.
+- Varredura assíncrona com progresso ao vivo e **cancelamento**; o poll de status usa contadores
+  atômicos para nunca disputar cadeado com os workers.
+
+**Bug encontrado e corrigido durante o desenvolvimento (armadilha clássica de Go):** a primeira versão
+enfileirava com "se a fila encher, dispara uma goroutine nova". Como `ReadDir` bloqueia em syscall, o
+runtime cria **uma thread do SO por goroutine bloqueada** — o processo chegou a **10.003 threads** (o
+teto do runtime), se estrangulou, a varredura não terminava e até o endpoint de status parava de
+responder. Trocado por fila com `sync.Cond` e paralelismo limitado de verdade: agora são **~33
+threads**, sempre.
+
+## [Não lançado] — Correção: `win.widgets-off` mirava um valor protegido (ago/2026)
+
+Achado no **primeiro teste ao vivo com o app elevado**: a regra falhava com `Access is denied.` e
+ficava "pendente" para sempre, sem o técnico ter como resolver.
+
+- **Causa (não era o motor):** `TaskbarDa` (`…\Explorer\Advanced`) é protegido pelo Windows quando o
+  Widgets já está governado por política. Comprovado: outro valor qualquer na mesma chave grava
+  normalmente, a ACL dá FullControl a Administradores, e `TaskbarDa` é negado **até para processo não
+  elevado do próprio dono**. Outras duas regras `hkcu_real_user` que criam valores ausentes
+  (`win.startup-delay-off`, `win.background-apps-off`) aplicaram e desfizeram sem erro — o fallback
+  de escrita HKCU está correto.
+- **Correção:** a regra passou a mirar a política oficial
+  `HKLM\SOFTWARE\Policies\Microsoft\Dsh\AllowNewsAndInterests`, que aceita escrita elevada. Agora
+  `requer_reboot: true` (política de Widgets só vale após reiniciar), então ela cai na fase 2 do
+  plano. A descrição explica por que o caminho do usuário não serve, para não ser "consertado" de
+  volta depois.
+- Numa máquina onde a política já estava aplicada, a regra passou a detectar **"aplicado"** em vez de
+  oferecer um trabalho que nunca daria certo.
+
+## [Não lançado] — Sessão, fatia S4: relações entre regras (ago/2026)
+
+Última fatia do desenho em [`docs/SESSAO.md`](SESSAO.md). O catálogo passou a expressar **ordem** e
+**redundância** entre regras — `rules.json` vai para o schema **1.1**.
+
+- **`depende_de`** e **`conflita_com`**, ambos opcionais (regra sem eles se comporta exatamente como
+  antes). No plano, o dependente é ordenado depois e fica **bloqueado com motivo legível** enquanto a
+  dependência não estiver marcada ou já aplicada.
+- **As relações declaradas são as que existem de verdade.** Cruzando o que cada regra escreve,
+  nenhuma das 61 grava a mesma chave que outra — os conflitos supostos no desenho (DNS × faxina de
+  rede, HAGS × MPO) não existem. Ficaram três: as duas regras de energia que gravam em
+  `SCHEME_CURRENT` dependem da troca de plano vir antes, e o Superfetch por registro conflita com o
+  Superfetch por serviço.
+- **Todo bloqueio tem saída**: conflito com regra já aplicada na máquina não bloqueia nada, porque
+  não haveria como destravar.
+- Ciclo de dependência quebra o build (teste no catálogo), em vez de travar o técnico em runtime.
+- 9 testes novos em `internal/sessao/relacoes_test.go`, incluindo integridade do catálogo.
+
+## [Não lançado] — Sessão, fatia S6: o reinício e a entrega (ago/2026)
+
+Fecha o ciclo do atendimento. O trilho da Sessão agora vai do "medir antes" até o PDF do cliente,
+**atravessando o reinício** — que era exatamente onde o atendimento se perdia.
+
+- **A sessão sobrevive ao reinício.** Antes de reiniciar, ela grava a intenção; na volta, reconhece
+  que o PC reiniciou e abre em *"O PC reiniciou — os ajustes da fase 2 estão valendo agora. O passo
+  seguinte é medir o resultado."*
+- **A detecção é por uptime**, não por relógio: se o Windows subiu há menos tempo do que quando o
+  reinício foi pedido, reiniciou. Não confirma por engano se o app só foi reaberto.
+- **Sem auto-start** (decisão mantida): nada de RunOnce/Tarefa Agendada disparando UAC no logon. O
+  app retoma quando o técnico o reabre.
+- **Etapa Entregar**: contadores do atendimento (aplicados, falharam, feitos à mão, etapas puladas) e
+  o veredito da prova — "Ganho medido: FPS médio 182 → 215 (+17,8%)" ou "Sem prova de FPS" com o
+  motivo.
+- **O relatório do cliente ganhou o bloco da sessão**: data, perfil, contadores, reinício datado,
+  tabelas antes × depois, checklist do que era na mão — e **o que não foi feito**: etapas puladas com
+  motivo, itens que falharam com a mensagem, e "não comparável" no lugar da tabela quando o cenário
+  mudou. Nome do cliente vem pré-preenchido da sessão.
+- 3 testes novos em `internal/sessao/reboot_test.go`.
+
+## [Não lançado] — Sessão, fatia S2: a prova (ago/2026)
+
+As etapas **Medir** e **Provar** passaram a existir de verdade: o ganho vira número medido, com
+cenário carimbado — ou vira um "não comparável" com o motivo escrito.
+
+- **Evidência antes × depois** guardada na sessão: benchmark (CPU/memória/disco) e captura de FPS
+  (médio, 1% low, 0.1% low, engasgo), cada uma com data e cenário.
+- **Cenário carimbado com dado real**: jogo, executável, resolução e Hz lidos do Windows na hora.
+  Comparação só acontece com **mesmo jogo e mesma resolução** — senão o app recusa e diz o que mudou
+  ("o antes foi medido em Valorant e o depois em Fortnite").
+- **A taxa de atualização não bloqueia a comparação**: se a tela foi de 120 para 165 Hz porque a
+  sessão corrigiu, isso é o ganho — vira observação, não impedimento.
+- **Ruído não é ganho**: diferença abaixo de 1% aparece como "igual". E o bloco de benchmark avisa,
+  por escrito, que bancada varia entre execuções (medido: dois runs seguidos sem mudar nada deram
+  +15,6% no índice e +126% no disco) — indicador, não prova. A prova é o FPS no jogo.
+- **Os números nunca vêm do cliente**: o benchmark roda no servidor e a captura é lida do
+  gerenciador do PresentMon.
+- Métricas invertidas tratadas certo (engasgo menor = melhor).
+- 8 testes novos em `internal/sessao/evidencia_test.go`.
+
+## [Não lançado] — Sessão, fatia S5: o executor (ago/2026)
+
+A etapa **Aplicar** deixou de mandar o técnico para outra tela: ela executa o plano.
+
+- **Fila por fase, ao vivo**: barra de andamento, item corrente e resultado item a item. A fase roda
+  em **um lote só** (um ponto de restauração, um registro no Histórico) — o "desfazer lote" continua
+  valendo, e o item aplicado guarda o `batch_id` que o liga ao undo.
+- **`aplicado` só depois de reler.** Terminada a fase, o motor varre de novo e confere. Escrita que
+  não persistiu (política de grupo, permissão, o Windows revertendo) vira **falhou com o motivo** —
+  o app parou de poder pôr ✓ em cima do que não pegou.
+- **Execução interrompida é admitida.** Se o app fechar (ou o PC reiniciar) no meio, na volta a
+  sessão marca a fase como *interrompida* e os itens como *indefinidos*, em vez de mentir
+  "aplicando" para sempre. Rodar a fase de novo é seguro — o motor pula o que já está aplicado.
+- **Fase 3 (na mão)** virou checklist: quem marca é a pessoa, e o app recusa marcar como "feito à
+  mão" um item que ele mesmo executa.
+- Consentimento é exigido **antes** de a fase começar, com a lista do que vai ser confirmado.
+- Sessão com arquivo ilegível agora **avisa** em vez de sumir da tela em silêncio (BOM passou a ser
+  tolerado na leitura).
+- `engine.ApplyRulesProgresso` (o `ApplyRules` de sempre, com aviso de andamento) e
+  `sessao.Transacao` (leitura-modificação-escrita sob um cadeado só).
+- 6 testes novos em `internal/sessao/executor_test.go`.
+
+## [Não lançado] — Sessão, fatia S3: o plano (ago/2026)
+
+A varredura devolvia uma lista de 61 toggles; agora ela vira **fila**. Segunda fatia de
+[`docs/SESSAO.md`](SESSAO.md).
+
+- **Etapa Planejar de verdade**: cruza a varredura + o **diagnóstico de gargalos** + o perfil e monta
+  um plano agrupado em 3 fases — *aplica agora* · *pede reinício* · *na mão* (BIOS/Windows).
+- **O gargalo vira o porquê do item.** "Desativar HAGS" deixa de ser um toggle solto e passa a dizer
+  *"Diagnóstico: HAGS desativado"*. Gargalo sem regra (XMP na BIOS, jogo no HD) vira item de mão com
+  a orientação — o app não finge que faz.
+- **Seleção padrão com regra clara**: o perfil semeia; **risco alto nunca vem marcado**; o que pede
+  confirmação (inclusive a limpeza, que não tem undo) também não; amarelo só entra pelo perfil que
+  assumiu esse risco. O plano mostra **tudo** que dá para fazer — esconder opção é decidir pelo técnico.
+- **Score projetado** com a mesma fórmula do Boost Score, rotulado como projeção do score e **não**
+  como previsão de FPS.
+- **Trocar de perfil dentro do Planejar** (com aviso de que regerar descarta o que foi marcado à mão).
+- **Planejar não exige mais administrador** — montar o plano é leitura e decisão; quem exige elevação
+  é Aplicar. Um PC sem admin agora ao menos fica sabendo o que precisaria ser feito.
+- Itens duplicados entre diagnóstico e regras consultivas (taxa de atualização, XMP) foram unificados.
+- `winutil.Gargalos()` expõe a lista tipada que antes só existia dentro do mapa do `/api/diagnostico`.
+- 12 testes novos em `internal/sessao/plano_test.go`.
+
+## [Não lançado] — Sessão, fatia S1: o trilho do atendimento (ago/2026)
+
+Primeira fatia do desenho em [`docs/SESSAO.md`](SESSAO.md): o app deixa de ser só um painel de telas
+paralelas e ganha um **procedimento com ordem e estado**. Nada foi removido — as páginas atuais
+continuam como "modo livre".
+
+- **Novo nó "Sessão"** no HUD: 7 etapas (Medir · Ler · Entender · Planejar · Aplicar · Provar ·
+  Entregar), com etapa 0 automática que confere elevação.
+- **Estado durável** em `%ProgramData%\ThazzDraco\sessoes\<id>.json` (+ ponteiro `sessao-atual.txt`),
+  escrita atômica a cada transição: fechou o app no meio, ele **reabre na etapa certa**.
+- **Pular exige motivo** — e o motivo fica gravado, para o relatório dizer o que não foi feito.
+- **Sem admin = modo Limitado**: Planejar/Aplicar ficam bloqueadas com explicação, e as etapas de
+  leitura continuam liberadas.
+- **Novo pacote `internal/sessao`** (modelo, máquina de etapas, store) + `internal/server/sessao.go`
+  com 6 rotas; rotas que mudam estado exigem **POST** (achado 🟠 do checkup, resolvido no código novo).
+- `DataDir`/`WriteFileAtomic` saíram do motor para `winutil/fs.go`, compartilhados com a sessão.
+- Testes da máquina de etapas em `internal/sessao/maquina_test.go`.
+
+Ainda não entra nesta fatia: plano automático (S3), evidências antes×depois (S2), executor por fase
+com verificação pós-escrita (S5) e continuidade pós-reboot (S6). As etapas Planejar/Aplicar dizem isso
+na tela em vez de fingir.
+
 ## [Não lançado] — Checkup geral: correções críticas + altas (jul/2026)
 
 Auditoria profunda de todo o app (motor, escritas/leituras no Windows, servidor HTTP, FPS, UI, build).
