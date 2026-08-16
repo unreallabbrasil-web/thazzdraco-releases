@@ -284,3 +284,65 @@ um mapa global 1,5 milhão de vezes num disco cheio custaria mais que a varredur
   podada permitiria "cresceu 12 GB desde ontem, quase tudo em X" — que é o que um técnico quer ver.
 - **Busca por nome** dentro do resultado (hoje só dá para navegar).
 - **L4**: o resultado da limpeza no relatório da Sessão.
+
+---
+
+## 11. Fatia E — o veredito com prova
+
+O relato que originou esta fatia: *"eu nunca sei o que eu posso apagar ou não. Posso apagar esses
+caches? Inclusive de npm, java, python? Dados de apps da Store abre uma pasta com várias coisas
+dentro, não sei o que pode ou não, se vai quebrar algo. É foda."*
+
+A tela dizia "cache regenerável" e pedia confiança. **Confiança não era o que faltava — faltava
+prova.** E o app já tinha os dados para provar; só não os mostrava.
+
+### 11.1 As três evidências
+
+Todo achado passou a carregar as três coisas que respondem "posso apagar?":
+
+1. **Quando foi usado pela última vez.** Sai de graça: a varredura já lê a data de cada arquivo.
+   Cada nó da árvore ganhou `Recente` (dias desde o arquivo mais novo abaixo dele), propagado de
+   baixo para cima — uma pasta cujo neto mudou hoje foi usada hoje.
+2. **Quem é o dono, e se o dono existe.** `exec.LookPath` para ferramentas de linha de comando; o
+   registro de pacotes para apps da Store. Se o Cargo não está instalado, o cache dele é peso morto
+   puro: não há o que "rebaixar depois" porque não há quem baixe.
+3. **Como volta se apagar.** "volta sozinho no próximo `npm install`" é uma coisa; "não volta: é
+   baixar 3,8 GB de novo" é outra bem diferente, e a diferença é o que decide na prática.
+
+O veredito (`SEGURO` / `PROVÁVEL` / `CUIDADO` / `NÃO`) **nunca aparece sozinho** — vem sempre com os
+fatos que o produziram. Selo sem prova seria só mais um aviso, e aviso é exatamente o que já existia
+e não resolvia.
+
+### 11.2 A regra que não se dobra
+
+Cache é sempre `SEGURO`, porque por definição ele se refaz — a evidência muda o **custo**, não o
+**se**. Dado do usuário **nunca** vira `SEGURO` automaticamente, por mais velho que esteja: no
+máximo `PROVÁVEL`, com a decisão devolvida a quem é dono do arquivo. Isso está preso por teste.
+
+### 11.3 Quebrar o agregado
+
+"Dados de apps da Store — 26,8 GB" era o pior item da tela: abre uma pasta com 134 nomes ilegíveis e
+ninguém sabe o que é o quê. Agora abre item por item, e a lista responde sozinha:
+
+```
+12,5 GB  Claude          CUIDADO   instalado, usado hoje — apagar zera login e configuração
+11,2 GB  SpotifyMusic    CUIDADO   instalado, usado hoje
+ 500 MB  TranslucentTB   PROVÁVEL  o aplicativo não está mais instalado — sobra de desinstalação
+```
+
+A chave é cruzar `%LOCALAPPDATA%\Packages` com as famílias de pacote instaladas
+(`HKCU\...\AppModel\Repository\Packages`, montando `Nome_PublisherId` a partir do nome completo).
+**A pasta de dados não some quando o app é desinstalado** — então essa diferença é espaço parado que
+ninguém consegue enxergar pelo Explorer.
+
+Cada item do detalhamento é um caminho real: dá para mandar para a Lixeira pela mesma cesta,
+passando pelo mesmo portão de exclusão da §10.2.
+
+### 11.4 O que fica de fora, e por quê
+
+- **Nada aqui apaga sozinho.** O veredito informa; quem marca é o usuário.
+- **`SEGURO` não vira "marcado por padrão".** Um item pré-marcado numa lista que apaga arquivo não é
+  consentimento, é armadilha.
+- **A extensão e o registro são pistas, não verdade absoluta.** Um app pode guardar dados fora da
+  pasta dele; um pacote pode estar provisionado sem estar instalado para este usuário. Por isso o
+  veredito máximo para dado do usuário continua sendo `PROVÁVEL`.
