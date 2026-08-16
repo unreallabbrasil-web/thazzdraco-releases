@@ -55,8 +55,21 @@ $naoEnviados = git log --oneline "@{u}.." 2>$null
 if ($naoEnviados) { Aviso "ha commits locais nao enviados - o codigo deste release nao esta no GitHub" }
 
 # ------------------------------------------------------------------ 2. versao
+# O VERSION e commitado ANTES de criar a tag. Sem isso a tag nasce apontando
+# para um commit onde o VERSION ainda diz a versao anterior — daqui a um ano,
+# quem for investigar "de onde saiu este binario" acha um commit que diz outra
+# coisa. Foi o que aconteceu na v5.0.1.
 Passo 2 "Gravando a versao $Versao..."
-if (-not $Simular) { Set-Content -Path "$app\VERSION" -Value $Versao -Encoding ASCII -NoNewline }
+if (-not $Simular) {
+    Set-Content -Path "$app\VERSION" -Value $Versao -Encoding ASCII -NoNewline
+    $mudou = git status --porcelain -- "$app\VERSION" 2>$null
+    if ($mudou) {
+        git add "$app\VERSION" 2>&1 | Out-Null
+        git commit -q -m "chore: VERSION $Versao" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { Ok "VERSION commitado (a tag vai apontar para ele)" }
+        else { Aviso "nao consegui commitar o VERSION - a tag vai apontar para o commit anterior" }
+    }
+}
 Ok "VERSION = $Versao"
 
 # ------------------------------------------------------------------- 3. build
