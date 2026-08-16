@@ -14,6 +14,12 @@ type RegSnapshot struct {
 	Hive     string `json:"hive"`
 	Sid      string `json:"sid,omitempty"`
 	HkcuReal bool   `json:"hkcu_real,omitempty"`
+	// Fallback marca que a ESCRITA de fato foi feita em HKEY_CURRENT_USER (nao em
+	// HKEY_USERS\<Sid>) porque o caminho preferido negou acesso — ver
+	// createKeyForWrite. O undo precisa saber disso pra restaurar na MESMA colmeia
+	// onde o valor realmente foi alterado, senao RestoreSnapshot tentaria escrever
+	// de volta no caminho negado e falharia do mesmo jeito.
+	Fallback bool   `json:"fallback,omitempty"`
 	Path     string `json:"path"`
 	Name     string `json:"name"`
 	Existed  bool     `json:"existed"`
@@ -151,6 +157,9 @@ func SnapshotValue(hive, sid string, hkcuReal bool, path, name string) RegSnapsh
 // RestoreSnapshot desfaz: regrava o valor antigo, ou apaga se ele nao existia.
 func RestoreSnapshot(s RegSnapshot) error {
 	root, sub := resolve(s.Hive, s.Sid, s.HkcuReal, s.Path)
+	if s.Fallback {
+		root, sub = registry.CURRENT_USER, s.Path
+	}
 	if !s.Existed {
 		k, err := registry.OpenKey(root, sub, registry.SET_VALUE)
 		if err != nil {
@@ -186,26 +195,48 @@ func RestoreSnapshot(s RegSnapshot) error {
 
 // ---- Escrita (apply) ---------------------------------------------------------
 
-// WriteDWord cria a chave se preciso e grava um DWORD.
-func WriteDWord(hive, sid string, hkcuReal bool, path, name string, val uint32) error {
+// createKeyForWrite abre/cria a chave em HKEY_USERS\<SID>\... (colmeia real do
+// usuario). Se isso falhar — perfil sem SID resolvido, hive nao carregada do
+// jeito esperado, ACL que nega ao processo elevado o que so o dono concederia
+// via HKCU normal — cai para HKEY_CURRENT_USER, espelhando o fallback que
+// ReadInteger/ReadString ja fazem na leitura. Sem isso, a escrita ficava
+// "Access is denied" numa maquina onde a leitura (via HKCU) funcionaria.
+func createKeyForWrite(hive, sid string, hkcuReal bool, path string) (k registry.Key, fallback bool, err error) {
 	root, sub := resolve(hive, sid, hkcuReal, path)
-	k, _, err := registry.CreateKey(root, sub, registry.SET_VALUE)
-	if err != nil {
-		return err
+	k, _, err = registry.CreateKey(root, sub, registry.SET_VALUE)
+	if err == nil {
+		return k, false, nil
 	}
-	defer k.Close()
-	return k.SetDWordValue(name, val)
+	if hive != "HKLM" && hkcuReal {
+		if k2, _, err2 := registry.CreateKey(registry.CURRENT_USER, path, registry.SET_VALUE); err2 == nil {
+			return k2, true, nil
+		}
+	}
+	return registry.Key(0), false, err
 }
 
-// WriteString cria a chave se preciso e grava um SZ.
-func WriteString(hive, sid string, hkcuReal bool, path, name, val string) error {
-	root, sub := resolve(hive, sid, hkcuReal, path)
-	k, _, err := registry.CreateKey(root, sub, registry.SET_VALUE)
+// WriteDWord cria a chave se preciso e grava um DWORD. `fallback` indica se a
+// escrita caiu para HKEY_CURRENT_USER — o chamador precisa gravar isso no
+// RegSnapshot pra o undo mirar a mesma colmeia.
+func WriteDWord(hive, sid string, hkcuReal bool, path, name string, val uint32) (fallback bool, err error) {
+	k, fallback, err := createKeyForWrite(hive, sid, hkcuReal, path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer k.Close()
-	return k.SetStringValue(name, val)
+	return fallback, k.SetDWordValue(name, val)
+}
+
+// WriteString cria a chave se preciso e grava um SZ. `fallback` indica se a
+// escrita caiu para HKEY_CURRENT_USER — o chamador precisa gravar isso no
+// RegSnapshot pra o undo mirar a mesma colmeia.
+func WriteString(hive, sid string, hkcuReal bool, path, name, val string) (fallback bool, err error) {
+	k, fallback, err := createKeyForWrite(hive, sid, hkcuReal, path)
+	if err != nil {
+		return false, err
+	}
+	defer k.Close()
+	return fallback, k.SetStringValue(name, val)
 }
 
 // NameVal é um par nome→valor (string) de um valor de registro.

@@ -27,16 +27,36 @@ func StartTypeName(st uint32) string {
 	return "Unknown"
 }
 
+// openServiceMinimal abre o SCM e o servico pedindo SOMENTE o acesso necessario
+// para a operacao (`access`), em vez do SERVICE_ALL_ACCESS que mgr.OpenService
+// usa por baixo. Varios servicos do Windows (WSearch, DiagTrack, etc.) tem uma
+// ACL que concede SERVICE_QUERY_CONFIG/SERVICE_CHANGE_CONFIG para Administradores
+// mas NEGA os direitos "extras" embutidos em ALL_ACCESS (WRITE_DAC, WRITE_OWNER,
+// DELETE) — pedir ALL_ACCESS faz o OpenService falhar com "access denied" mesmo
+// para quem roda elevado, quando a operacao real (ler/gravar o startup type)
+// seria permitida com o acesso minimo.
+func openServiceMinimal(name string, access uint32) (*mgr.Service, error) {
+	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return nil, err
+	}
+	defer windows.CloseServiceHandle(scm)
+	namePtr, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.OpenService(scm, namePtr, access)
+	if err != nil {
+		return nil, err
+	}
+	return &mgr.Service{Name: name, Handle: h}, nil
+}
+
 // ServiceStartType retorna o tipo de inicializacao atual e se o servico existe.
 func ServiceStartType(name string) (uint32, bool) {
-	m, err := mgr.Connect()
+	s, err := openServiceMinimal(name, windows.SERVICE_QUERY_CONFIG)
 	if err != nil {
-		return 0, false
-	}
-	defer m.Disconnect()
-	s, err := m.OpenService(name)
-	if err != nil {
-		return 0, false // servico ausente nesta maquina
+		return 0, false // servico ausente nesta maquina (ou sem nem consulta)
 	}
 	defer s.Close()
 	cfg, err := s.Config()
@@ -49,12 +69,7 @@ func ServiceStartType(name string) (uint32, bool) {
 // SetServiceStartType altera o tipo de inicializacao (ex.: Disabled). Mantem o
 // resto da configuracao intacto. Requer elevacao.
 func SetServiceStartType(name string, startType uint32) error {
-	m, err := mgr.Connect()
-	if err != nil {
-		return err
-	}
-	defer m.Disconnect()
-	s, err := m.OpenService(name)
+	s, err := openServiceMinimal(name, windows.SERVICE_QUERY_CONFIG|windows.SERVICE_CHANGE_CONFIG)
 	if err != nil {
 		return err
 	}
@@ -113,16 +128,11 @@ var candidatosServicos = []ServiceInfo{
 
 // HeavyServices retorna os serviços não-essenciais presentes na máquina com estado rodando/parado.
 func HeavyServices() []ServiceInfo {
-	m, err := mgr.Connect()
-	if err != nil {
-		return []ServiceInfo{}
-	}
-	defer m.Disconnect()
 	var out []ServiceInfo
 	for _, cand := range candidatosServicos {
-		s, err := m.OpenService(cand.Nome)
+		s, err := openServiceMinimal(cand.Nome, windows.SERVICE_QUERY_STATUS)
 		if err != nil {
-			continue // serviço não existe nesta máquina
+			continue // serviço não existe nesta máquina (ou sem nem consulta)
 		}
 		st, qErr := s.Query()
 		s.Close()
@@ -152,12 +162,7 @@ func IsHeavyServiceCandidate(name string) bool {
 
 // StopServiceNow para um serviço (sem desabilitar permanentemente). Requer elevação.
 func StopServiceNow(name string) error {
-	m, err := mgr.Connect()
-	if err != nil {
-		return err
-	}
-	defer m.Disconnect()
-	s, err := m.OpenService(name)
+	s, err := openServiceMinimal(name, windows.SERVICE_STOP|windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		return err
 	}
