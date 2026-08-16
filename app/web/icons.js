@@ -42,6 +42,8 @@
     diag: S('<circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-3.6-3.6"/><path d="M7.5 11H9l1-2.2 2 4.4 1-2.2h1.5"/>'),
     wrench: S('<path d="M14.5 5.5a3.8 3.8 0 0 0-5 5L4 16v4h4l5.5-5.5a3.8 3.8 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z"/>'),
     trash: S('<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/>'),
+    ext: S('<path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
+    folder: S('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
     doc: S('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8 13h8M8 17h6"/>'),
     print: S('<path d="M6 9V3h12v6"/><rect x="5" y="9" width="14" height="8" rx="1"/><path d="M7 17h10v4H7z"/>'),
     backup: S('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
