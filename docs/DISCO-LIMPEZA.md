@@ -202,3 +202,85 @@ classificação está certa antes de existir qualquer botão que apague.
    confirmação própria. (O resultado ainda pode aparecer no relatório — isso é a L4.)
 3. **Instaladores velhos em Downloads: relatório**, com os maiores e mais antigos listados. A pasta é
    pessoal; quem apaga é o dono.
+
+---
+
+## 10. Fatia D — escolher o disco, apagar do app, analisar melhor
+
+Três pedidos de uma vez: poder escolher **qual** unidade varrer, poder **apagar de dentro do
+programa**, e uma análise mais forte. As três mexem na mesma tela, mas só a segunda mexe na
+segurança — por isso ela tem seção própria.
+
+### 10.1 Escolher o que varrer
+
+A tela herdava a lista do diagnóstico, que filtra `DRIVE_FIXED`. Para "saúde do PC" isso está certo;
+para "onde está meu espaço" está errado — **HD externo e pendrive nunca apareciam**, e é justamente
+onde mora arquivo esquecido. `winutil.Unidades()` lista tudo com o tipo declarado (fixo, removível,
+rede, óptico, RAM), rótulo do volume e sistema de arquivos.
+
+Decisões:
+
+- **Unidade sem mídia continua na lista, apagada.** Sumir a letra faria o técnico que acabou de
+  plugar o pendrive achar que o app não viu. Ele vê, e diz o motivo.
+- **Rede aparece com aviso.** Varrer `\servidor` depende da rede e pode demorar muito mais; isso
+  precisa ser dito *antes* do clique.
+- **Dá para varrer uma pasta**, não só a unidade. Varrer 4 TB para olhar uma pasta é desperdício do
+  tempo de quem está esperando na frente do PC. `AlvoDeVarredura()` valida e normaliza.
+
+### 10.2 Apagar o que o usuário escolheu
+
+Este é o único caminho do app que apaga arquivo **do usuário**. A limpeza por categoria (§3) e esta
+exclusão trocam de garantias de propósito:
+
+| | limpeza por categoria | exclusão escolhida |
+|---|---|---|
+| quem escolhe | o app, de uma lista fechada | o usuário, item por item, vendo o tamanho |
+| o que alcança | só cache regenerável | qualquer dado dele |
+| destino | apagado de vez | **Lixeira** por padrão |
+| o que é proibido | pasta pessoal | pasta do sistema |
+
+**A Lixeira é a peça central.** Ela transforma a única operação sem volta do produto em uma operação
+com volta — e sem depender de o app estar certo sobre o que era importante. Usa `SHFileOperationW`
+com `FOF_ALLOWUNDO`, que é a única forma de o arquivo ir para a Lixeira de um jeito que o Windows
+saiba restaurar. Apagar de vez existe, mas é escolha explícita no modal, porque arquivo gigante não
+cabe na Lixeira e um botão que às vezes tem desfazer e às vezes não é pior que nenhum.
+
+Camadas de segurança, cada uma suficiente sozinha:
+
+1. **Limite de consentimento**: o caminho tem que estar dentro da varredura atual. Sem varredura
+   pronta, o endpoint recusa tudo — sem raiz não existe limite.
+2. **`PodeExcluirEscolhido`** recusa por padrão: raiz de unidade, Windows, Program Files,
+   recuperação, inicialização, pontos de restauração, a própria Lixeira, perfil inteiro
+   (`C:\Users\Fulano`), as pastas pessoais conhecidas *em si* (o conteúdo delas pode), junction/link
+   e os arquivos que o sistema usa em tempo real (`pagefile.sys` e afins).
+3. **A UI não oferece o que o portão recusa.** A árvore e as listas vêm anotadas com
+   `protegido`/`motivo` pela *mesma* função que recusa na hora de apagar. Antes dava para marcar
+   `C:\Windows`, ver o total subir, confirmar, e só então receber "recusado" — uma interface que
+   promete o que não cumpre.
+4. **Confirmação que mostra item por item**, com tamanho e caminho, e o destino no próprio rótulo do
+   botão ("Mandar 41 GB para a Lixeira" / "Apagar 41 GB de vez").
+5. **Tudo em `operacoes.log`**, com destino, tamanho e as recusas.
+
+O resultado é conferido no disco, não no código de retorno: se o item ainda existe depois da
+operação, ele conta como falha, mesmo que a API não tenha reclamado.
+
+### 10.3 Análise
+
+- **Por tipo de conteúdo.** A árvore diz *onde*; isto diz *o quê*. "80 GB em `D:\midia`" não ajuda
+  ninguém a decidir; "80 GB de vídeo, o maior com 12 GB de 2019" ajuda na hora. Vem da extensão, que
+  é o que dá para saber sem abrir o arquivo — a tela mostra como pista, com exemplos reais, nunca
+  como veredito.
+- **Grandes e parados.** Arquivos acima de 100 MB sem modificação há mais de um ano. É o lugar mais
+  provável de sobrar espaço sem fazer falta. Com a ressalva na própria tela: backup e coleção também
+  ficam parados de propósito.
+- **Idade em todo lugar.** "há 3 anos" decide melhor que "1274 dias".
+
+Custo: a soma por extensão é acumulada por pasta e mesclada uma vez só, não a cada arquivo — travar
+um mapa global 1,5 milhão de vezes num disco cheio custaria mais que a varredura inteira.
+
+### 10.4 O que ficou de fora
+
+- **Varredura guardada entre sessões.** Hoje reabrir o app exige varrer de novo. Guardar a árvore
+  podada permitiria "cresceu 12 GB desde ontem, quase tudo em X" — que é o que um técnico quer ver.
+- **Busca por nome** dentro do resultado (hoje só dá para navegar).
+- **L4**: o resultado da limpeza no relatório da Sessão.

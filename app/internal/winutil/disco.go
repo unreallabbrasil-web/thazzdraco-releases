@@ -51,7 +51,58 @@ type NoDisco struct {
 type ArquivoGrande struct {
 	Caminho string `json:"caminho"`
 	Bytes   int64  `json:"bytes"`
+	Dias    int    `json:"dias"` // desde a última modificação
+	// Protegido/Motivo dizem a UI o que ela NAO deve oferecer para apagar.
+	//
+	// Quem responde e a mesma funcao que recusa na hora de apagar
+	// (PodeExcluirEscolhido). Se a tela decidisse isso por conta propria, as duas
+	// regras iam divergir e a UI acabaria deixando marcar, somar no total e
+	// confirmar uma exclusao que o backend sempre recusa — o pior tipo de
+	// interface: a que promete o que nao cumpre.
+	Protegido bool   `json:"protegido,omitempty"`
+	Motivo    string `json:"motivo,omitempty"`
 }
+
+// anotaProtecao marca os itens que o portao de exclusao nunca vai aceitar.
+func anotaProtecao(itens []ArquivoGrande, raiz string) {
+	for i := range itens {
+		if err := PodeExcluirEscolhido(itens[i].Caminho, raiz); err != nil {
+			itens[i].Protegido = true
+			itens[i].Motivo = motivoCurto(err)
+		}
+	}
+}
+
+// motivoCurto tira o caminho da mensagem: na UI o caminho ja esta ali do lado, e
+// repetir empurra o motivo para fora da tela.
+func motivoCurto(err error) string {
+	m := err.Error()
+	if i := strings.LastIndex(m, ": "); i > 0 {
+		m = m[:i]
+	}
+	return m
+}
+
+// FamiliaArquivo agrupa o disco por TIPO de conteudo.
+//
+// "A pasta X tem 80 GB" nao diz o que fazer. "Voce tem 120 GB de video e 40 GB
+// de imagem de disco (ISO)" diz — porque a decisao de apagar e por tipo de
+// coisa, nao por lugar onde ela caiu.
+type FamiliaArquivo struct {
+	ID       string          `json:"id"`
+	Nome     string          `json:"nome"`
+	Bytes    int64           `json:"bytes"`
+	Arquivos int64           `json:"arquivos"`
+	Exemplos []ArquivoGrande `json:"exemplos,omitempty"`
+}
+
+const (
+	// Um arquivo so entra na lista de "grande e parado" se for grande de verdade
+	// e velho de verdade. Sem os dois filtros, a lista viraria o disco inteiro e
+	// nao ajudaria ninguem a decidir nada.
+	minAntigo  = 100 << 20 // 100 MB
+	diasAntigo = 365
+)
 
 // minDuplicado: so arquivo grande entra na caca a duplicados. Varrer o disco
 // inteiro atras de arquivos iguais acharia milhares de arquivinhos identicos que
@@ -69,6 +120,8 @@ type ResultadoDisco struct {
 	DuracaoMs int64           `json:"duracao_ms"`
 	Quando    string          `json:"quando"`
 	Maiores   []ArquivoGrande `json:"maiores"`
+	Antigos   []ArquivoGrande `json:"antigos"`  // grandes e parados há mais de um ano
+	Familias  []FamiliaArquivo `json:"familias"` // por tipo de conteúdo
 	raiz      *NoDisco
 	// candidatos a duplicado: tamanho exato → caminhos. So arquivos grandes.
 	// Tamanho igual e so o primeiro filtro; a confirmacao vem depois, lendo as
@@ -113,17 +166,17 @@ func (g *gerenciadorDisco) Status() map[string]any {
 	return r
 }
 
-// Iniciar dispara a varredura de uma raiz (ex.: "C:\"). Uma por vez.
+// Iniciar dispara a varredura de uma raiz. Uma por vez.
+//
+// Aceita unidade ("D:\") e tambem pasta ("E:\Jogos"): varrer 4 TB para olhar uma
+// pasta e desperdicio de tempo de quem esta esperando na frente do PC.
 func (g *gerenciadorDisco) Iniciar(raiz string) error {
-	raiz = strings.TrimSpace(raiz)
-	if raiz == "" {
-		raiz = `C:\`
+	if strings.TrimSpace(raiz) == "" {
+		raiz = os.Getenv("SystemDrive") + `\`
 	}
-	if !strings.HasSuffix(raiz, `\`) {
-		raiz += `\`
-	}
-	if st, err := os.Stat(raiz); err != nil || !st.IsDir() {
-		return os.ErrNotExist
+	raiz, err := AlvoDeVarredura(raiz)
+	if err != nil {
+		return err
 	}
 
 	g.mu.Lock()
@@ -142,6 +195,20 @@ func (g *gerenciadorDisco) Iniciar(raiz string) error {
 
 	go g.varrer(raiz, cancelar)
 	return nil
+}
+
+// RaizAtual devolve a raiz da varredura pronta.
+//
+// E o LIMITE DE CONSENTIMENTO da exclusao: o usuario mandou varrer aquilo, entao
+// aquilo e o universo do que ele pode mandar apagar nesta tela. Sem varredura
+// pronta devolve vazio, e nada pode ser excluido.
+func (g *gerenciadorDisco) RaizAtual() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.resultado == nil {
+		return ""
+	}
+	return g.resultado.Raiz
 }
 
 // Cancelar interrompe a varredura em andamento (a UI pode desistir).
@@ -248,6 +315,9 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 	q := novaFila()
 	var mu sync.Mutex // protege res (contadores agregados)
 	maiores := novoTopArquivos(maioresArquivos)
+	antigos := novoTopArquivos(maioresArquivos)
+	porExt := map[string]*somaExt{} // protegido por mu
+	agora := time.Now()
 
 	workers := runtime.NumCPU()
 	if workers > maxWorkersDisco {
@@ -275,6 +345,11 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 
 		var bytesLocais, arquivosLocais int64
 		var subs []*NoDisco
+		// Soma por extensao acumulada LOCALMENTE e mesclada uma vez por pasta.
+		// Travar o mapa global a cada arquivo seria 1,5 milhao de disputas de
+		// cadeado num disco cheio; por pasta sao algumas centenas de milhares —
+		// e a pasta tipica tem meia duzia de extensoes distintas.
+		locais := map[string]*somaExt{}
 		for _, e := range ents {
 			nome := e.Name()
 			cam := filepath.Join(t.caminho, nome)
@@ -290,12 +365,33 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 				subs = append(subs, sub)
 				continue
 			}
-			bytesLocais += info.Size()
+			tam := info.Size()
+			dias := int(agora.Sub(info.ModTime()).Hours() / 24)
+			if dias < 0 {
+				dias = 0 // arquivo com data no futuro (relógio errado, zip antigo)
+			}
+			bytesLocais += tam
 			arquivosLocais++
-			maiores.oferecer(cam, info.Size())
-			if info.Size() >= minDuplicado {
+			maiores.oferecer(cam, tam, dias)
+			if tam >= minAntigo && dias >= diasAntigo {
+				antigos.oferecer(cam, tam, dias)
+			}
+
+			ext := extensaoDe(nome)
+			s := locais[ext]
+			if s == nil {
+				s = &somaExt{}
+				locais[ext] = s
+			}
+			s.bytes += tam
+			s.arquivos++
+			if tam > s.maior.Bytes {
+				s.maior = ArquivoGrande{Caminho: cam, Bytes: tam, Dias: dias}
+			}
+
+			if tam >= minDuplicado {
 				mu.Lock()
-				res.dups[info.Size()] = append(res.dups[info.Size()], cam)
+				res.dups[tam] = append(res.dups[tam], cam)
 				mu.Unlock()
 			}
 		}
@@ -308,6 +404,18 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 
 		mu.Lock()
 		res.Pastas += int64(len(subs))
+		for ext, s := range locais {
+			g := porExt[ext]
+			if g == nil {
+				g = &somaExt{}
+				porExt[ext] = g
+			}
+			g.bytes += s.bytes
+			g.arquivos += s.arquivos
+			if s.maior.Bytes > g.maior.Bytes {
+				g.maior = s.maior
+			}
+		}
 		mu.Unlock()
 
 		// progresso ao vivo por átomo: o poll de status nunca disputa cadeado com
@@ -348,6 +456,13 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 	res.Bytes = noRaiz.Bytes
 	res.Arquivos = noRaiz.Arquivos
 	res.Maiores = maiores.ordenados()
+	res.Antigos = antigos.ordenados()
+	res.Familias = agrupaFamilias(porExt)
+	anotaProtecao(res.Maiores, raiz)
+	anotaProtecao(res.Antigos, raiz)
+	for i := range res.Familias {
+		anotaProtecao(res.Familias[i].Exemplos, raiz)
+	}
 	res.DuracaoMs = time.Since(inicio).Milliseconds()
 	res.Quando = time.Now().Format("2006-01-02 15:04:05")
 
@@ -419,10 +534,16 @@ func (g *gerenciadorDisco) Arvore(caminho string, limite int) (map[string]any, b
 	var somaFilhos int64
 	for _, f := range filhos {
 		somaFilhos += f.Bytes
-		out = append(out, map[string]any{
+		linha := map[string]any{
 			"nome": f.Nome, "caminho": f.Caminho, "bytes": f.Bytes,
 			"arquivos": f.Arquivos, "entravel": f.Entravel,
-		})
+		}
+		// A UI so oferece marcar o que o portao aceitaria de verdade.
+		if err := PodeExcluirEscolhido(f.Caminho, res.Raiz); err != nil {
+			linha["protegido"] = true
+			linha["motivo"] = motivoCurto(err)
+		}
+		out = append(out, linha)
 	}
 	// "arquivos soltos" = o que esta na pasta mas nao em subpasta nenhuma
 	var somaTodas int64
@@ -486,7 +607,7 @@ func novoTopArquivos(n int) *topArquivos {
 	return &topArquivos{n: n, itens: make([]ArquivoGrande, 0, n+1)}
 }
 
-func (t *topArquivos) oferecer(caminho string, bytes int64) {
+func (t *topArquivos) oferecer(caminho string, bytes int64, dias int) {
 	if bytes <= 0 {
 		return
 	}
@@ -495,7 +616,7 @@ func (t *topArquivos) oferecer(caminho string, bytes int64) {
 	if len(t.itens) == t.n && bytes <= t.menor {
 		return
 	}
-	t.itens = append(t.itens, ArquivoGrande{Caminho: caminho, Bytes: bytes})
+	t.itens = append(t.itens, ArquivoGrande{Caminho: caminho, Bytes: bytes, Dias: dias})
 	if len(t.itens) > t.n {
 		sort.Slice(t.itens, func(i, j int) bool { return t.itens[i].Bytes > t.itens[j].Bytes })
 		t.itens = t.itens[:t.n]

@@ -7,7 +7,12 @@
 :root{
   --bg:#04060b; --panel:#0b131d; --panel-2:#0f1a27; --panel-3:#16273a;
   --line:#163048; --line-2:#21456a; --line-glow:#2ea8e655;
-  --ink:#eaf4ff; --ink-2:#9fbad6; --ink-3:#5f7d9c; --ink-4:#385575;
+  /* --ink-3/--ink-4 sao os valores do MASTER.md (design system do projeto). Os
+     anteriores (#5f7d9c e #385575) medem 4.26:1 e 2.37:1 sobre --panel-2 e
+     reprovam em AA — e sao justamente os tons usados em caminho de arquivo,
+     idade e nota de rodape, o texto que mais precisa ser lido. Agora: 7.44:1 e
+     6.27:1. Sao 173 usos no app, entao a correcao vale a tela inteira. */
+  --ink:#eaf4ff; --ink-2:#9fbad6; --ink-3:#8fa8c2; --ink-4:#7f9ab6;
   --cyan:#2ea8e6; --cyan-br:#5fd2ff; --cyan-deep:#0c3653;
   --green:#34e29f;
   --amber:#ff9d3c;  /* aviso urgente: temperatura alta, limites críticos próximos */
@@ -1384,6 +1389,114 @@ body.perf .pt{display:none}body.perf .bolt{opacity:0}body.perf .energy-pulse.on{
 .dk-rodape{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:18px 4px 0;padding-top:14px;border-top:1px solid var(--line);font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)}
 .dk-rodape .dk-nota{font-family:var(--font-ui);font-size:11.5px;color:var(--ink-4);max-width:60ch;line-height:1.45}
 .dk-rodape .mbtn{margin-left:auto}
+
+/* --- escolha do alvo: unidade ou pasta ------------------------------------- */
+/* Unidade sem mídia continua na lista, apagada: o técnico plugou o pendrive e
+   precisa entender por que não dá para varrer, não ver a letra sumir. */
+.dk-chip.vazia{opacity:.45;cursor:not-allowed;border-style:dashed}
+.dk-chip .dk-tipo{display:block;margin-top:5px;font-style:normal;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-4)}
+.dk-chip.on .dk-tipo{color:var(--cyan-br)}
+/* Sem clip-path aqui: o chanfro recorta o outline de foco do input e do botão
+   que vivem dentro (invariante 2 do MASTER.md). */
+.dk-pasta{display:flex;align-items:center;gap:10px;margin:10px 4px 0;padding:8px 12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm)}
+.dk-pasta.on{border-color:var(--cyan)}
+.dk-pasta svg{width:15px;height:15px;color:var(--ink-4);flex:none}
+/* body tem user-select:none (é um app, não uma página); sem devolver aqui, não
+   dá nem para selecionar o caminho que você mesmo digitou. */
+.dk-pasta input{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--ink);font-family:var(--font-mono);font-size:12px;padding:4px 0;user-select:text}
+.dk-pasta:focus-within{border-color:var(--cyan)}
+.dk-pasta input::placeholder{color:var(--ink-4)}
+
+/* --- cartões de resumo ------------------------------------------------------ */
+.dk-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:9px;margin:18px 4px 0}
+/* Cartão navegável é <button>: dá foco, Enter/Espaço e leitura por teclado.
+   Div com onclick não é alcançável por teclado nenhum. Sem clip-path pelo
+   mesmo motivo do campo de pasta. */
+.dk-card{text-align:left;font:inherit;background:var(--panel-2);border:1px solid var(--line);border-left:2px solid var(--cyan);border-radius:var(--r-sm);padding:12px 15px;display:flex;flex-direction:column;gap:2px}
+button.dk-card{cursor:pointer;transition:.15s}
+button.dk-card:hover{border-color:var(--line-2);border-left-color:var(--cyan-br);background:var(--panel-3)}
+.dk-card span{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.dk-card b{font-family:var(--font-display);font-size:23px;font-variant-numeric:tabular-nums;color:var(--cyan-br);line-height:1.15}
+.dk-card em{font-style:normal;font-size:11px;color:var(--ink-3)}
+
+/* --- abas da tela ----------------------------------------------------------- */
+.dk-abas{display:flex;gap:4px;flex-wrap:wrap;margin:18px 4px 12px;border-bottom:1px solid var(--line)}
+.dk-aba{background:none;border:0;border-bottom:2px solid transparent;padding:9px 14px;cursor:pointer;color:var(--ink-3);font-family:var(--font-ui);font-size:12.5px;transition:.15s}
+.dk-aba:hover{color:var(--ink)}
+.dk-aba.on{color:var(--cyan-br);border-bottom-color:var(--cyan)}
+
+/* --- seleção dentro das listas --------------------------------------------- */
+/* A barra de tamanho é absolute inset:0; sem z-index a caixa de seleção fica
+   embaixo dela e o clique não chega. */
+.dk-check,.dk-check-vazio{position:relative;z-index:2;flex:none;margin-top:0}
+button.dk-check{padding:0;font:inherit;background:none}
+button.dk-check[aria-checked="true"]{background:linear-gradient(180deg,var(--cyan-br),var(--cyan))}
+.dk-check-vazio{width:19px;height:19px}
+.dk-linha.sel{border-color:var(--cyan)}
+.dk-linha.sel .dk-barra i{background:linear-gradient(90deg,var(--cyan-deep),var(--panel-3))}
+/* Linha protegida não fica apagada: ela precisa ser LIDA (é onde estão os GB do
+   Windows). O que muda é só o cadeado no lugar da caixa e o motivo no rodapé. */
+.dk-linha.prot .dk-nome{color:var(--ink-2)}
+.dk-linha.prot .dk-idade{color:var(--gold)}
+.dk-linha.sumida{opacity:.4}
+.dk-linha.sumida .dk-nome{text-decoration:line-through}
+.dk-idade{position:relative;z-index:1;flex:none;min-width:104px;text-align:right;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)}
+.dk-abrir{position:relative;z-index:2;flex:none;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid transparent;color:var(--ink-4);cursor:pointer;font-size:12px;transition:.12s}
+.dk-abrir:hover{border-color:var(--line-2);color:var(--cyan-br)}
+.dk-abrir svg{width:13px;height:13px}
+.dk-sel-tudo{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 4px 10px;font-size:12.5px;color:var(--ink-3)}
+.dk-sel-tudo b{font-family:var(--font-display);font-size:17px;color:var(--cyan-br)}
+.dk-sel-tudo .mbtn:first-of-type{margin-left:auto}
+
+/* --- por tipo de conteúdo --------------------------------------------------- */
+.dk-fams{display:flex;flex-direction:column;gap:9px;margin:0 4px}
+.dk-fam{background:var(--panel-2);border:1px solid var(--line);clip-path:var(--cut-card);padding:12px 15px}
+.dk-fam-top{display:flex;align-items:baseline;gap:12px}
+.dk-fam-top b{flex:1;font-size:13.5px;color:var(--ink)}
+.dk-fam-top span{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)}
+.dk-fam-top i{font-style:normal;font-family:var(--font-display);font-size:17px;font-variant-numeric:tabular-nums;color:var(--cyan-br)}
+.dk-fbar{height:4px;background:var(--panel);margin:9px 0 0;overflow:hidden}
+.dk-fbar i{display:block;height:100%;background:var(--cyan)}
+.dk-fam-ex{display:flex;flex-direction:column;gap:5px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+.dk-ex{display:flex;align-items:center;gap:10px}
+.dk-ex b{flex:none;min-width:72px;font-family:var(--font-display);font-size:12.5px;color:var(--ink-2)}
+.dk-ex code{flex:1;min-width:0;font-size:10.5px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+.dk-ex span{flex:none;font-family:var(--font-mono);font-size:10px;color:var(--ink-3)}
+
+/* --- cesta: a barra que só aparece quando há algo escolhido ----------------- */
+/* Sem clip-path: a barra contém dois botões e o chanfro comeria o foco deles. */
+.dk-cesta{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:16px 4px 0;padding:13px 18px;background:var(--panel-2);border:1px solid var(--red);border-left:3px solid var(--red);border-radius:var(--r-sm);box-shadow:var(--shadow)}
+.dk-cesta-num{display:flex;flex-direction:column}
+.dk-cesta-num span{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.dk-cesta-num b{font-family:var(--font-display);font-size:25px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.dk-cesta-txt{flex:1;min-width:180px;font-size:12px;color:var(--ink-3);line-height:1.45}
+/* Deriva do --red do sistema em vez de inventar um terceiro vermelho. A tinta
+   escura sobre o vermelho claro passa folgado em contraste. */
+.dk-cesta .btnG.danger{background:var(--red);color:#1a0605;filter:drop-shadow(0 8px 16px #ff5d5444)}
+.dk-cesta .btnG.danger:hover{filter:drop-shadow(0 10px 20px #ff5d5477) brightness(1.06)}
+
+.dk-exres{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:16px 4px 0;padding:13px 18px;background:var(--panel-2);border:1px solid var(--line);border-left:2px solid var(--cyan);clip-path:var(--cut-card)}
+.dk-exres-num{display:flex;flex-direction:column}
+.dk-exres-num span{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.dk-exres-num b{font-family:var(--font-display);font-size:25px;color:var(--cyan-br)}
+.dk-exres-lista{flex:1;min-width:200px;display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--ink-2)}
+
+/* --- confirmação da exclusão (dentro do modal) ------------------------------ */
+.dk-conf{list-style:none;margin:10px 0 0;padding:0;max-height:230px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.dk-conf li{display:flex;align-items:baseline;gap:11px;padding:7px 10px;background:var(--panel-2);border:1px solid var(--line)}
+.dk-conf li b{flex:none;min-width:74px;font-family:var(--font-display);font-size:13px;color:var(--cyan-br)}
+.dk-conf li>div{flex:1;min-width:0;display:flex;flex-direction:column}
+.dk-conf li span{font-size:12.5px;color:var(--ink)}
+.dk-conf li code{font-size:10.5px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+.dk-conf li em{flex:none;font-style:normal;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
+.dk-conf-mais{justify-content:center;color:var(--ink-3);font-size:12px}
+.dk-modo{display:flex;flex-direction:column;gap:7px;margin:14px 0 0}
+.dk-modo-op{display:flex;align-items:flex-start;gap:11px;padding:11px 13px;background:var(--panel-2);border:1px solid var(--line);cursor:pointer;transition:.14s}
+.dk-modo-op:hover{border-color:var(--line-2)}
+.dk-modo-op.on{border-color:var(--cyan);background:var(--cyan-deep)}
+.dk-modo-op input{margin-top:3px;accent-color:var(--cyan)}
+.dk-modo-op b{display:block;font-size:13px;color:var(--ink)}
+.dk-modo-op span{display:block;margin-top:2px;font-size:11.5px;color:var(--ink-3);line-height:1.45}
 
 /* ===== Navegação reorganizada: barra única de sub-abas ===================== */
 .subtabs-global{display:none;margin:0 30px 0;padding:0 0 12px;border-bottom:1px solid var(--line);flex:none;z-index:3}
