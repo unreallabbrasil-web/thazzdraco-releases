@@ -45,6 +45,12 @@ type NoDisco struct {
 	Arquivos int64      `json:"arquivos"` // contagem recursiva
 	Filhos   []*NoDisco `json:"filhos,omitempty"`
 	Entravel bool       `json:"entravel"` // tem subpasta: a UI deixa entrar
+	// Recente = dias desde o arquivo mais novo em qualquer lugar abaixo daqui
+	// (-1 = pasta vazia). E a evidencia mais barata e mais util que existe: uma
+	// pasta de 12 GB que ninguem toca ha 8 meses e uma decisao facil; a mesma
+	// pasta usada hoje e outra conversa. Sai de graca — a varredura ja le a data
+	// de cada arquivo para as outras listas.
+	Recente int `json:"recente"`
 }
 
 // ArquivoGrande e uma linha da lista dos maiores arquivos.
@@ -344,6 +350,7 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 		}
 
 		var bytesLocais, arquivosLocais int64
+		recenteLocal := -1
 		var subs []*NoDisco
 		// Soma por extensao acumulada LOCALMENTE e mesclada uma vez por pasta.
 		// Travar o mapa global a cada arquivo seria 1,5 milhao de disputas de
@@ -372,6 +379,9 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 			}
 			bytesLocais += tam
 			arquivosLocais++
+			if recenteLocal < 0 || dias < recenteLocal {
+				recenteLocal = dias
+			}
 			maiores.oferecer(cam, tam, dias)
 			if tam >= minAntigo && dias >= diasAntigo {
 				antigos.oferecer(cam, tam, dias)
@@ -401,6 +411,7 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 		t.no.Entravel = len(subs) > 0
 		t.no.Bytes = bytesLocais
 		t.no.Arquivos = arquivosLocais
+		t.no.Recente = recenteLocal
 
 		mu.Lock()
 		res.Pastas += int64(len(subs))
@@ -484,12 +495,18 @@ func (g *gerenciadorDisco) varrer(raiz string, cancelar chan struct{}) {
 // somaRecursiva propaga o tamanho das subpastas para cima.
 func somaRecursiva(n *NoDisco) (int64, int64) {
 	bytes, arquivos := n.Bytes, n.Arquivos
+	recente := n.Recente
 	for _, f := range n.Filhos {
 		b, a := somaRecursiva(f)
 		bytes += b
 		arquivos += a
+		// "tocada" vale para qualquer arquivo abaixo: uma pasta cujo neto mudou
+		// hoje foi usada hoje, mesmo que ela propria nao tenha arquivo nenhum.
+		if f.Recente >= 0 && (recente < 0 || f.Recente < recente) {
+			recente = f.Recente
+		}
 	}
-	n.Bytes, n.Arquivos = bytes, arquivos
+	n.Bytes, n.Arquivos, n.Recente = bytes, arquivos, recente
 	return bytes, arquivos
 }
 

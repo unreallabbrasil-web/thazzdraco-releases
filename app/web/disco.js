@@ -18,7 +18,7 @@
     resumo: null, atual: null, maiores: null, antigos: null, familias: null,
     achados: null, marcados: new Set(), limpeza: null,
     cesta: new Map(),      // caminho -> {nome, bytes, pasta}
-    aba: "pastas", poll: null, modoExclusao: "lixeira", exclusao: null,
+    aba: "pastas", poll: null, modoExclusao: "lixeira", exclusao: null, detalhes: {},
     sumidos: new Set(),    // o que já foi apagado nesta sessão de tela
   };
 
@@ -380,6 +380,65 @@
       ${resultadoHTML()}${grupos}${dups}${inst}`;
   }
 
+  /* ---- A prova: por que dá (ou não dá) para apagar --------------------------- */
+
+  const VEREDITOS = {
+    seguro:   { rot: "SEGURO",   cls: "vd-seguro" },
+    provavel: { rot: "PROVÁVEL", cls: "vd-provavel" },
+    cuidado:  { rot: "CUIDADO",  cls: "vd-cuidado" },
+    nao:      { rot: "NÃO",      cls: "vd-nao" },
+  };
+
+  // provaHTML mostra o veredito COM as evidências que o produziram.
+  // Veredito sozinho seria só mais um aviso — e aviso é exatamente o que já
+  // existia e não resolvia a dúvida de quem está na frente do PC.
+  function provaHTML(p, id) {
+    if (!p || !p.veredito) return "";
+    const v = VEREDITOS[p.veredito] || VEREDITOS.cuidado;
+    const fatos = [];
+    if (p.uso_dias === 0) fatos.push("usado <b>hoje</b>");
+    else if (p.uso_dias > 0) fatos.push(`último uso <b>${idade(p.uso_dias)}</b>`);
+    if (p.dono_tem === "sim") fatos.push(`<b>${escHtml(p.dono)}</b> está instalado`);
+    else if (p.dono_tem === "nao") fatos.push(`<b>${escHtml(p.dono)}</b> não está instalado`);
+    if (p.como_volta) fatos.push(escHtml(p.como_volta));
+    return `<div class="vd ${v.cls}">
+      <div class="vd-top"><span class="vd-sel">${v.rot}</span><b>${escHtml(p.frase)}</b></div>
+      ${fatos.length ? `<div class="vd-fatos">${fatos.map((f) => `<span>${f}</span>`).join("")}</div>` : ""}
+      ${p.detalhavel ? `<button class="mbtn vd-abrir" data-act="detalhar" data-id="${escHtml(id)}">
+        ${D.detalhes[id] ? "Fechar a lista" : "Ver item por item"}</button>` : ""}
+    </div>${p.detalhavel ? detalheHTML(id) : ""}`;
+  }
+
+  function detalheHTML(id) {
+    const d = D.detalhes[id];
+    if (!d) return "";
+    if (d === "carregando") return `<div class="dt-lista"><div class="empty">${IC("ring")}<div>Abrindo…</div></div></div>`;
+    if (!d.length) return `<div class="dt-lista"><div class="empty">${IC("empty")}<div>Nada aqui dentro.</div></div></div>`;
+    return `<div class="dt-lista">${d.map((i) => {
+      const v = VEREDITOS[i.veredito] || VEREDITOS.cuidado;
+      return `<div class="dt-item ${naCesta(i.caminho) ? "sel" : ""}">
+        ${marcaHTML(i, i.nome)}
+        <b class="dt-tam">${gb(i.bytes)}</b>
+        <div class="dt-corpo">
+          <div class="dt-nome"><b>${escHtml(i.nome)}</b><span class="vd-sel ${v.cls}">${v.rot}</span></div>
+          <span class="dt-frase">${escHtml(i.frase)}</span>
+          <code title="${escHtml(i.caminho)}">${escHtml(i.caminho)}</code>
+        </div>
+        ${abrirBtn(i.caminho, i.nome)}
+      </div>`;
+    }).join("")}</div>`;
+  }
+
+  async function detalhar(id) {
+    if (D.detalhes[id]) { delete D.detalhes[id]; render(); return; }
+    D.detalhes[id] = "carregando"; render();
+    try {
+      const r = await api("/api/disco/detalhar?id=" + encodeURIComponent(id));
+      D.detalhes[id] = r.itens || [];
+    } catch (e) { delete D.detalhes[id]; toast("err", "Não abriu a lista", e.message); }
+    render();
+  }
+
   function achadoHTML(x, classe) {
     const acao = classe === "coberto" && x.atalho
       ? `<button class="mbtn" data-act="ir" data-alvo="${escHtml(x.atalho)}">Abrir</button>`
@@ -398,6 +457,7 @@
         <b>${escHtml(x.nome)}</b>
         <span>${escHtml(x.descricao)}</span>
         ${x.aviso ? `<span class="ac-aviso">${escHtml(x.aviso)}</span>` : ""}
+        ${provaHTML(x.prova, x.id)}
       </div>
       ${acao}
     </div>`;
@@ -474,7 +534,7 @@
 
   async function varrer() {
     D.atual = D.maiores = D.resumo = D.antigos = D.familias = D.achados = null;
-    D.limpeza = D.exclusao = null; D.marcados.clear(); D.cesta.clear(); D.sumidos.clear();
+    D.limpeza = D.exclusao = null; D.marcados.clear(); D.cesta.clear(); D.sumidos.clear(); D.detalhes = {};
     D.rodando = true; D.progresso = {}; render();
     try {
       await api("/api/disco/varrer", { raiz: D.alvo });
@@ -683,6 +743,7 @@
       if (act === "limpar-cesta") { D.cesta.clear(); render(); return; }
       if (act === "excluir") return pedirExclusao();
       if (act === "fechar-exres") { D.exclusao = null; render(); return; }
+      if (act === "detalhar") return detalhar(el.dataset.id);
       if (act === "dobra") { D.abrirIntocavel = !D.abrirIntocavel; render(); return; }
       if (act === "marcar") { const id = el.dataset.id; D.marcados.has(id) ? D.marcados.delete(id) : D.marcados.add(id); render(); return; }
       if (act === "limpar") return pedirLimpeza();
