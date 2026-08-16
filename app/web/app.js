@@ -26,7 +26,7 @@ function sectionOf(cat) {
   return s ? s.key : null; // null = limpeza (vai pra pagina propria)
 }
 
-const state = { scan: null, rules: [], byId: {}, page: "inicio", cat: "todas", query: "", scoreInicial: null, startup: [], bench: null, benchBase: null, fps: null, fpsBase: null, fpsDur: 30, fpsPoll: null, fpsRefreshing: false, diag: null, driver: null, repairPoll: null, bloat: null, deep: null, thermal: null, clientLogo: null, admin: true, gpuPanel: null, customJogos: [], updatePoll: null, sub: { manutencao: "limpeza", medicao: "desempenho" } };
+const state = { scan: null, rules: [], byId: {}, page: "inicio", sessao: null, cat: "todas", query: "", scoreInicial: null, startup: [], bench: null, benchBase: null, fps: null, fpsBase: null, fpsDur: 30, fpsPoll: null, fpsRefreshing: false, diag: null, driver: null, repairPoll: null, bloat: null, deep: null, thermal: null, clientLogo: null, admin: true, gpuPanel: null, customJogos: [], updatePoll: null, sub: { manutencao: "limpeza", medicao: "desempenho" }, aba: {} };
 function escHtml(s) { return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 // "1 otimização aplicada" / "3 otimizações aplicadas" — evita repetir a formula ternária em cada toast.
 function pluralWord(n, singular, plural) { return n === 1 ? singular : (plural || singular + "s"); }
@@ -430,23 +430,133 @@ function ingest(scan) {
   renderAll();
 }
 
+/* ---- Navegação: 5 nós ------------------------------------------------------
+   O app cresceu por acumulação: eram 8 nós soltos + 10 sub-abas + 7 botões no
+   HUD, e achar as coisas virou adivinhação. NOS reorganiza isso na mesma lógica
+   que a Sessão já provou — LER → AGIR → REGISTRAR:
+
+     Núcleo    o portal (identidade + Boost Score + escanear)
+     Sessão    o caminho guiado, ponta a ponta
+     Máquina   tudo que só LÊ e mede
+     Ações     tudo que ESCREVE
+     Registro  o que já foi feito
+
+   É só camada de apresentação: por baixo continuam valendo showPage/showSub, e
+   nenhuma tela precisou ser reescrita. `destino` aponta para [pagina] ou
+   [pagina, sub-aba]; `extras` empilha panes irmãos na mesma tela (Limpar reúne
+   limpeza + debloat + browsers, que eram três abas fazendo a mesma coisa).
+--------------------------------------------------------------------------- */
+const NOS = [
+  { id: "nucleo", nome: "Núcleo", icone: "home", destino: ["inicio"] },
+  { id: "sessao", nome: "Sessão", icone: "guide", badge: "navSessao", destino: ["sessao"] },
+  {
+    id: "maquina", nome: "Máquina", icone: "activity", abas: [
+      { id: "diagnostico", nome: "Diagnóstico", icone: "diag", destino: ["diagnostico"] },
+      { id: "desempenho", nome: "Desempenho", icone: "activity", destino: ["medicao", "desempenho"] },
+      { id: "disco", nome: "Disco", icone: "disk", destino: ["manutencao", "disco"] },
+      { id: "gpu", nome: "GPU", icone: "gpu", destino: ["gpu"] },
+      { id: "fps", nome: "FPS no jogo", icone: "game", destino: ["medicao", "fps"] },
+      { id: "benchmark", nome: "Benchmark", icone: "gauge", destino: ["medicao", "benchmark"] },
+    ],
+  },
+  {
+    id: "acoes", nome: "Ações", icone: "bolt", badge: "navOtim", abas: [
+      { id: "otimizacoes", nome: "Otimizações", icone: "bolt", destino: ["otimizacoes"] },
+      { id: "jogos", nome: "Jogos", icone: "gamepad", destino: ["jogos"] },
+      { id: "limpar", nome: "Limpar", icone: "broom", destino: ["manutencao", "limpeza"], extras: ["debloat", "browsers"] },
+      { id: "reparar", nome: "Reparar", icone: "wrench", destino: ["manutencao", "reparo"], extras: ["ferramentas"] },
+      { id: "inicializacao", nome: "Inicialização", icone: "rocket", destino: ["manutencao", "inicializacao"] },
+    ],
+  },
+  { id: "registro", nome: "Registro", icone: "history", destino: ["historico"] },
+];
+
+// índice reverso: "pagina" ou "pagina:sub" → {no, aba}
+const ONDE = (() => {
+  const m = {};
+  NOS.forEach((no) => {
+    const reg = (d, aba) => { m[d.length > 1 ? d[0] + ":" + d[1] : d[0]] = { no, aba }; };
+    if (no.destino) reg(no.destino, null);
+    (no.abas || []).forEach((a) => reg(a.destino, a));
+  });
+  return m;
+})();
+
+function achaNo(id) { return NOS.find((n) => n.id === id); }
+
+// renderNav monta o HUD de comando uma vez; sincronizaNav só acende o ativo.
+function renderNav() {
+  $("#mainnav").innerHTML = NOS.map((n) => `<a class="cn" data-no="${n.id}">
+    <span class="ic" data-icon="${n.icone}"></span>${n.badge ? `<span class="b" id="${n.badge}"></span>` : ""}
+    <span class="l">${n.nome}</span></a>`).join("");
+  $$("#mainnav [data-icon]").forEach((el) => { const ic = IC(el.dataset.icon); if (ic) el.innerHTML = ic; });
+}
+
+// sincronizaNav acende o nó/aba correspondentes ao que showPage/showSub abriram.
+// Fica no fim do roteador antigo, então a barra nunca discorda do que está na tela.
+function sincronizaNav() {
+  const chave = SUBPAGES[state.page] ? state.page + ":" + state.sub[state.page] : state.page;
+  const alvo = ONDE[chave] || ONDE[state.page] || {};
+  $$("#mainnav .cn").forEach((a) => a.classList.toggle("active", !!alvo.no && a.dataset.no === alvo.no.id));
+
+  const bar = $("#subGlobal");
+  const abas = (alvo.no && alvo.no.abas) || [];
+  bar.classList.toggle("show", abas.length > 0);
+  if (!abas.length) { bar.innerHTML = ""; return; }
+  bar.innerHTML = abas.map((a) => `<button data-aba="${a.id}" data-no="${alvo.no.id}"
+    class="${alvo.aba && a.id === alvo.aba.id ? "active" : ""}"><span data-icon="${a.icone}"></span>${a.nome}</button>`).join("");
+  $$("#subGlobal [data-icon]").forEach((el) => { const ic = IC(el.dataset.icon); if (ic) el.innerHTML = ic; });
+}
+
+// irNo abre um nó (na primeira aba, ou na última que o usuário viu nele).
+function irNo(id) {
+  const no = achaNo(id); if (!no) return;
+  if (no.destino) return abre(no.destino);
+  const aba = (no.abas || []).find((a) => a.id === state.aba[no.id]) || no.abas[0];
+  irAba(no.id, aba.id);
+}
+
+function irAba(noID, abaID) {
+  const no = achaNo(noID); if (!no) return;
+  const aba = (no.abas || []).find((a) => a.id === abaID); if (!aba) return;
+  state.aba[no.id] = aba.id; // volta nela quando o usuário voltar ao nó
+  abre(aba.destino, aba.extras);
+}
+
+// abre delega para o roteador antigo e, se a aba junta panes irmãos, liga os extras.
+function abre(destino, extras) {
+  if (destino.length > 1) showSub(destino[0], destino[1]); else showPage(destino[0]);
+  (extras || []).forEach((t) => {
+    const pn = $("#pane-mn-" + t); if (pn) pn.classList.add("active");
+    renderPaneExtra(t);
+  });
+}
+
+// renderPaneExtra dispara o render de um pane que veio junto (não é o principal).
+function renderPaneExtra(sub) {
+  if (sub === "debloat" && !state.bloat) renderBloat();
+  else if (sub === "browsers") renderBrowserClean();
+  else if (sub === "ferramentas") renderTools();
+}
+
 /* ---- Router (páginas + sub-abas) ----------------------------------------- */
 // Páginas que têm sub-abas: prefixo dos panes (pane-<prefixo>-<sub>).
 const SUBPAGES = {
-  manutencao: { nav: "subManut", prefix: "mn", tabs: ["limpeza", "reparo", "debloat", "ferramentas", "inicializacao", "browsers"] },
-  medicao:    { nav: "subMed",   prefix: "md", tabs: ["desempenho", "fps", "benchmark"] },
+  manutencao: { prefix: "mn", tabs: ["disco", "limpeza", "reparo", "debloat", "ferramentas", "inicializacao", "browsers"] },
+  medicao:    { prefix: "md", tabs: ["desempenho", "fps", "benchmark"] },
 };
 
 function showPage(name) {
   state.page = name;
-  $$(".mainnav a").forEach((a) => a.classList.toggle("active", a.dataset.page === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + name));
   $(".pages").scrollTop = 0;
   if (SUBPAGES[name]) { showSub(name, state.sub[name]); return; } // delega à sub-aba ativa
+  sincronizaNav();
   stopLiveJobs();             // saiu de toda página com job ao vivo
   if (name === "historico") renderHistorico();
   if (name === "jogos") { renderJogos(); initLiveGameBar(); }
   if (name === "gpu") renderGpu();
+  if (name === "sessao" && window.SESSAO) SESSAO.render(); // trilho do atendimento (sessao.js)
   if (name === "diagnostico") { if (state.diag) { renderDiag(); renderDriver(); } else runDiag(); }
 }
 
@@ -456,13 +566,14 @@ function showSub(page, sub) {
   if (!cfg.tabs.includes(sub)) sub = cfg.tabs[0];
   state.sub[page] = sub;
   if (state.page !== page) return showPage(page); // showPage chama showSub de volta
-  $$("#" + cfg.nav + " button").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
   cfg.tabs.forEach((t) => { const pn = $("#pane-" + cfg.prefix + "-" + t); if (pn) pn.classList.toggle("active", t === sub); });
   $(".pages").scrollTop = 0;
+  sincronizaNav();
   stopLiveJobs(page + ":" + sub); // para o que não é desta sub-aba
   // dispara o render da sub-aba ativa
   if (page === "manutencao") {
-    if (sub === "limpeza" && !state.deep) renderDeepClean();
+    if (sub === "disco") { if (window.DISCO) DISCO.abrir(); }
+    else if (sub === "limpeza" && !state.deep) renderDeepClean();
     else if (sub === "debloat" && !state.bloat) renderBloat();
     else if (sub === "ferramentas") renderTools();
     else if (sub === "inicializacao") renderStartup();
@@ -494,12 +605,22 @@ function stopLiveJobs(dest) {
   if (state.drvAuditPoll) { clearInterval(state.drvAuditPoll); state.drvAuditPoll = null; const b = $("#btnDriverAudit"); if (b) b.disabled = false; }
   if (state.drvInstallPoll) { clearInterval(state.drvInstallPoll); state.drvInstallPoll = null; }
   if (dest !== "jogos") stopLiveGamePoll(); // F1: para o poll de Game ao Vivo ao sair da aba
+  // a varredura de disco continua no backend; só o poll da tela para
+  if (dest !== "manutencao:disco" && window.DISCO) DISCO.parar();
 }
 
-// navTo: navegação por nome lógico (deep-links de diagnóstico/limpeza).
+// navTo: navegação por nome lógico. É o contrato dos deep-links (diagnóstico,
+// plano da sessão, gargalos com `pagina:x`) — os nomes NÃO mudam quando as telas
+// são reorganizadas; só o destino deles muda aqui.
 function navTo(target) {
-  const map = { limpeza: ["manutencao", "limpeza"], inicializacao: ["manutencao", "inicializacao"], desempenho: ["medicao", "desempenho"], fps: ["medicao", "fps"], benchmark: ["medicao", "benchmark"] };
-  if (map[target]) showSub(map[target][0], map[target][1]); else showPage(target);
+  const map = {
+    limpeza: "manutencao:limpeza", inicializacao: "manutencao:inicializacao",
+    desempenho: "medicao:desempenho", fps: "medicao:fps", benchmark: "medicao:benchmark",
+  };
+  const alvo = ONDE[map[target] || target];
+  if (alvo && alvo.aba) return irAba(alvo.no.id, alvo.aba.id);
+  if (alvo && alvo.no) return irNo(alvo.no.id);
+  showPage(target); // nome fora do mapa: cai no roteador antigo
 }
 
 /* ---- Inicialização ------------------------------------------------------- */
@@ -1105,6 +1226,10 @@ async function bkDelete(id) {
 }
 
 async function openReport() {
+  // Se há sessão aberta, ela manda: o nome do cliente já foi dito uma vez e o
+  // relatório ganha o bloco do atendimento (o que foi feito, o que não foi e por quê).
+  const sesHTML = (window.SESSAO && SESSAO.atual()) ? SESSAO.relatorioHTML() : "";
+  if (window.SESSAO && SESSAO.cliente() && !$("#reportClient").value) $("#reportClient").value = SESSAO.cliente();
   let hist = []; try { hist = await api("/api/historico"); } catch (e) {}
   const applied = []; (hist || []).forEach((b) => b.rules.forEach((r) => applied.push(r.titulo)));
   const scan = state.scan || {}, tot = scan.totais || {}, p = scan.perfil || {};
@@ -1149,6 +1274,7 @@ async function openReport() {
     <div class="r-head"><img src="logo.png" alt=""><div><h1>Relatório de Otimização</h1><div class="r-sub">ThazzDraco PC FPS Boost${cliente ? " · Cliente: " + escHtml(cliente) : ""} · ${data}</div></div>${state.clientLogo ? `<img src="${state.clientLogo}" class="r-clientlogo" alt="">` : ""}</div>
     <div class="r-score"><div class="col"><span>Score antes</span><b style="color:${scoreHex(antes)}">${antes}</b></div><div class="arrow">→</div><div class="col"><span>Score depois</span><b style="color:${scoreHex(depois)}">${depois}</b></div>
       <div class="col" style="margin-left:auto;text-align:right"><span>Otimizações</span><b style="color:#1a9e6b">${applied.length}</b></div></div>
+    ${sesHTML}
     ${fpsBlock}
     ${perfBlock}
     <h2>Computador</h2>
@@ -1309,7 +1435,11 @@ async function applyIds(ids, origem, msg) {
       afterMutation(data);
       const rep = data.relatorio || {}, n = (rep.aplicadas || []).length;
       const erros = Object.values(rep.erros || {});
-      const negado = erros.some((m) => /denied|negad|acesso/i.test(m || ""));
+      // so culpamos falta de admin quando o backend CONFIRMA que nao esta elevado
+      // (state.admin vem de winutil.IsAdmin() no boot) — senao um erro qualquer com
+      // "acesso/negado" (ex.: processo protegido, chave do TrustedInstaller) mentia
+      // "precisa de admin" pra quem ja roda elevado.
+      const negado = !state.admin && erros.some((m) => /denied|negad|acesso/i.test(m || ""));
       if (rep.limpeza_mb) toast("ok", `Limpeza concluída`, `${fmtMB(rep.limpeza_mb)} liberados.`);
       else if (n) toast("ok", `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}`, rep.restore_point ? "Ponto de restauração criado." : "");
       else if (!erros.length) toast("info", "Nada a aplicar", nadaAplicarMotivo(rep.puladas));
@@ -1344,9 +1474,12 @@ async function applyGreens() {
   busy(true, "Otimizando (seguros)…");
   try { const d = await api("/api/aplicar-verdes", { confirmar: false }); afterMutation(d);
     const rep = d.relatorio || {}, n = (rep.aplicadas || []).length;
-    const negado = Object.values(rep.erros || {}).some((m) => /denied|negad|acesso/i.test(m || ""));
-    toast(n ? "ok" : "info", n ? `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}` : "Nada novo aplicado", n ? "Ganhos seguros ativados." : "");
-    if (negado) adminWarn();
+    const erros = Object.values(rep.erros || {});
+    const negado = !state.admin && erros.some((m) => /denied|negad|acesso/i.test(m || ""));
+    if (negado) { adminWarn(); }
+    else if (n) toast("ok", `${n} ${pluralWord(n, "otimização aplicada", "otimizações aplicadas")}`, "Ganhos seguros ativados.");
+    else if (erros.length) toast("err", "Alguns itens falharam", erros[0]);
+    else toast("info", "Nada novo aplicado", "");
   } catch (e) { toast("err", "Falha", e.message); } finally { busy(false); }
 }
 function optimizeSection() {
@@ -1380,10 +1513,8 @@ function closeModal() { $("#modal").classList.remove("show"); }
 
 /* ---- Eventos ------------------------------------------------------------- */
 function wire() {
-  $("#mainnav").onclick = (e) => { const a = e.target.closest("[data-page]"); if (a) showPage(a.dataset.page); };
-  $("#subManut").onclick = (e) => { const b = e.target.closest("[data-sub]"); if (b) showSub("manutencao", b.dataset.sub); };
-  $("#subMed").onclick = (e) => { const b = e.target.closest("[data-sub]"); if (b) showSub("medicao", b.dataset.sub); };
-  $("#btnHist").onclick = () => showPage("historico");
+  $("#mainnav").onclick = (e) => { const a = e.target.closest("[data-no]"); if (a) irNo(a.dataset.no); };
+  $("#subGlobal").onclick = (e) => { const b = e.target.closest("[data-aba]"); if (b) irAba(b.dataset.no, b.dataset.aba); };
   $("#btnRescan").onclick = () => doScan();
   $("#btnUpdatePanel").onclick = () => openUpdatePanel();
   // F5: limpar histórico de performance
@@ -3430,9 +3561,12 @@ function applyPreset(id) {
         const data = await api("/api/aplicar-preset", { preset_id: id, confirmar: true });
         afterMutation(data);
         const rep = data.relatorio || {}, n = (rep.aplicadas || []).length;
-        const negado = Object.values(rep.erros || {}).some((m) => /denied|negad|acesso/i.test(m || ""));
-        toast(n ? "ok" : "info", `Perfil ${p.nome}`, n ? `${n} ajuste(s) aplicados.` : (negado ? "Precisa de administrador." : "Já estava tudo aplicado."));
-        if (negado) adminWarn();
+        const erros = Object.values(rep.erros || {});
+        const negado = !state.admin && erros.some((m) => /denied|negad|acesso/i.test(m || ""));
+        if (negado) { adminWarn(); toast("err", `Perfil ${p.nome}`, "Precisa de administrador."); }
+        else if (n) toast("ok", `Perfil ${p.nome}`, `${n} ajuste(s) aplicados.`);
+        else if (erros.length) toast("err", `Perfil ${p.nome}`, erros[0]);
+        else toast("info", `Perfil ${p.nome}`, "Já estava tudo aplicado.");
       } catch (e) { toast("err", "Falha ao aplicar perfil", e.message); } finally { busy(false); }
     },
   });
@@ -3614,7 +3748,7 @@ async function boot() {
   const perfAuto = (navigator.hardwareConcurrency || 8) <= 2 || matchMedia("(prefers-reduced-motion: reduce)").matches;
   setPerf(perfSaved !== null ? perfSaved === "1" : perfAuto);
 
-  buildGauge(); spawnParticles(); wire();
+  buildGauge(); spawnParticles(); renderNav(); wire(); sincronizaNav();
   // C4: SSE heartbeat — substitui polling /api/ping; sobrevive a throttling de aba
   // inativa porque é uma conexão persistente, não um timer. Reconecta se cair.
   (function hb() {

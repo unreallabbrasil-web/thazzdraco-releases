@@ -37,12 +37,13 @@ type Server struct {
 	version string
 	token   string // segredo por-sessão exigido em todo /api/ (gerado no boot)
 
-	mu       sync.Mutex // serializa operacoes do motor (scan/apply/registro)
-	opMu     sync.Mutex // serializa operacoes destrutivas pesadas (debloat/limpeza/driver)
-	lastPing time.Time
-	pingMu   sync.Mutex
-	inFlight int32 // requisicoes em andamento — o watchdog nunca encerra com >0
-	hbCount  int32 // conexoes SSE de heartbeat abertas (teto para nao travar o watchdog)
+	mu        sync.Mutex // serializa operacoes do motor (scan/apply/registro)
+	opMu      sync.Mutex // serializa operacoes destrutivas pesadas (debloat/limpeza/driver)
+	lastPing  time.Time
+	pingMu    sync.Mutex
+	inFlight  int32 // requisicoes em andamento — o watchdog nunca encerra com >0
+	hbCount   int32 // conexoes SSE de heartbeat abertas (teto para nao travar o watchdog)
+	execAtiva int32 // 1 = uma fase do plano da sessao esta sendo executada agora
 
 	// F1: Modo Game ao Vivo
 	gameMu        sync.Mutex
@@ -164,6 +165,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/ferramentas/wu/status", s.handleWUStatus)
 	mux.HandleFunc("/api/ferramentas/wu/pausar", s.handleWUPausar)
 	mux.HandleFunc("/api/ferramentas/wu/retomar", s.handleWURetomar)
+	// Sessao (docs/SESSAO.md) — o trilho do atendimento. Fatia S1.
+	mux.HandleFunc("/api/sessao", s.handleSessaoAtual)
+	mux.HandleFunc("/api/sessao/nova", s.handleSessaoNova)
+	mux.HandleFunc("/api/sessao/retomar", s.handleSessaoRetomar)
+	mux.HandleFunc("/api/sessao/etapa", s.handleSessaoEtapa)
+	mux.HandleFunc("/api/sessao/encerrar", s.handleSessaoEncerrar)
+	mux.HandleFunc("/api/sessao/plano/gerar", s.handleSessaoPlanoGerar)
+	mux.HandleFunc("/api/sessao/plano/selecionar", s.handleSessaoPlanoSelecionar)
+	mux.HandleFunc("/api/sessao/plano/feito", s.handleSessaoPlanoFeito)
+	mux.HandleFunc("/api/sessao/aplicar", s.handleSessaoAplicar)
+	mux.HandleFunc("/api/sessao/status", s.handleSessaoStatus)
+	mux.HandleFunc("/api/sessao/medir", s.handleSessaoMedir)
+	mux.HandleFunc("/api/sessao/fps-pronto", s.handleSessaoFPSPronto)
+	mux.HandleFunc("/api/sessao/reiniciar", s.handleSessaoReiniciar)
+	mux.HandleFunc("/api/sessao/reboot-visto", s.handleSessaoRebootVisto)
+	// Explorador de disco — onde o espaço foi parar.
+	mux.HandleFunc("/api/disco/varrer", s.handleDiscoVarrer)
+	mux.HandleFunc("/api/disco/status", s.handleDiscoStatus)
+	mux.HandleFunc("/api/disco/cancelar", s.handleDiscoCancelar)
+	mux.HandleFunc("/api/disco/arvore", s.handleDiscoArvore)
+	mux.HandleFunc("/api/disco/achados", s.handleDiscoAchados)
+	mux.HandleFunc("/api/disco/abrir", s.handleDiscoAbrir)
+	mux.HandleFunc("/api/disco/limpar", s.handleDiscoLimpar)
+	mux.HandleFunc("/api/sessoes", s.handleSessoes)
 	mux.Handle("/", s.web)
 	return s.instrument(s.securityGuard(mux))
 }
@@ -1188,12 +1213,19 @@ func (s *Server) handleCustomPresetAplicar(w http.ResponseWriter, r *http.Reques
 
 // handleReboot reinicia o Windows (acionado pelo usuario, com confirmacao na UI).
 func (s *Server) handleReboot(w http.ResponseWriter, _ *http.Request) {
-	cmd := exec.Command("shutdown", "/r", "/t", "3")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-	err := cmd.Start()
+	err := reiniciarWindows()
 	resp := map[string]any{"ok": err == nil}
 	if err != nil {
 		resp["erro"] = err.Error()
 	}
 	writeJSON(w, 200, resp)
+}
+
+// reiniciarWindows agenda o reinicio. Compartilhado com a sessao, que precisa
+// gravar a intencao antes de chamar — um caminho so para reiniciar significa um
+// comportamento so.
+func reiniciarWindows() error {
+	cmd := exec.Command("shutdown", "/r", "/t", "3")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	return cmd.Start()
 }

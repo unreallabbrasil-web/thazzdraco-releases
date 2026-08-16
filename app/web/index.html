@@ -39,9 +39,6 @@
         <div class="tcell pn"><b id="cPendentes">—</b><span>Pendentes</span></div>
         <div class="tcell op" title="Ajustes opcionais além do essencial — não obrigatórios, mas somam ganho"><b id="cOportunidades">—</b><span>Extras</span></div>
       </div>
-      <button class="iconbtn" id="btnHist" title="Histórico de otimizações"><span data-icon="history"></span></button>
-      <button class="iconbtn" id="btnBackup" title="Backup &amp; restauração"><span data-icon="backup"></span></button>
-      <button class="iconbtn" id="btnReport" title="Relatório do cliente"><span data-icon="doc"></span></button>
       <button class="iconbtn" id="btnOverlay" title="Overlay minimalista — métricas em janela flutuante"><span data-icon="overlay"></span></button>
       <button class="iconbtn" id="btnPerf" title="Modo performance (reduz efeitos)"><span data-icon="perf"></span></button>
       <button class="iconbtn" id="btnRescan" title="Reescanear"><span data-icon="scan"></span></button>
@@ -60,6 +57,9 @@
   </header>
 
   <div class="noadmin" id="noadmin"><span data-icon="warn"></span> Rode como <b>administrador</b> para ativar os módulos. Feche e abra o ThazzDraco.exe com botão direito → "Executar como administrador".</div>
+
+  <!-- Sub-abas do nó ativo (uma barra só, montada por app.js a partir de NOS) -->
+  <nav class="subtabs subtabs-global" id="subGlobal"></nav>
 
   <!-- ===== PÁGINAS ===== -->
   <main class="pages">
@@ -94,6 +94,11 @@
         <div>Alguns módulos pedem <b>reinício</b> para efeito pleno.</div>
         <button class="btn-reboot" id="btnReboot">Reiniciar agora</button>
       </div>
+    </section>
+
+    <!-- SESSÃO (trilho do atendimento — docs/SESSAO.md) -->
+    <section class="page" id="page-sessao">
+      <div id="sessaoBox"></div>
     </section>
 
     <!-- OTIMIZAÇÕES -->
@@ -149,34 +154,12 @@
 
     <!-- MANUTENÇÃO (sub-abas) -->
     <section class="page" id="page-manutencao">
-      <nav class="subtabs" id="subManut">
-        <button class="active" data-sub="limpeza"><span data-icon="broom"></span>Limpeza</button>
-        <button data-sub="reparo"><span data-icon="wrench"></span>Reparo</button>
-        <button data-sub="debloat"><span data-icon="trash"></span>Debloat</button>
-        <button data-sub="ferramentas"><span data-icon="sys"></span>Ferramentas</button>
-        <button data-sub="inicializacao"><span data-icon="rocket"></span>Inicialização</button>
-        <button data-sub="browsers"><span data-icon="shield"></span>Browsers</button>
-      </nav>
 
-      <div class="subpane" id="pane-mn-browsers">
-        <div class="ptitle">Limpeza por browser · cache, cookies e histórico</div>
-        <div class="repair-intro">
-          Remove dados acumulados de Chrome, Edge, Brave e Firefox: <b>cache</b> (libera espaço),
-          <b>cookies</b> (sessões e login), <b>histórico</b> e <b>sessões</b> salvas.
-          <span class="bench-note">Feche o browser antes de limpar. Cookies removem login — você precisará
-          entrar novamente nos sites.</span>
-        </div>
-        <div class="browser-bar">
-          <button class="btnG" id="btnBrowserScan"><span data-icon="scan"></span> Verificar browsers</button>
-          <span id="browserSummary" class="bench-note"></span>
-        </div>
-        <div id="browserGrid" class="browser-grid"></div>
-        <div class="repair-actions" id="browserActions" style="display:none">
-          <button class="btn-hero" id="btnBrowserClean"><span data-icon="broom"></span> Limpar selecionados</button>
-        </div>
+      <div class="subpane active" id="pane-mn-disco">
+        <div id="discoBox"></div>
       </div>
 
-      <div class="subpane active" id="pane-mn-limpeza">
+      <div class="subpane" id="pane-mn-limpeza">
         <div class="ptitle">Limpeza de temporários</div>
         <div class="clean-card" id="cleanCard"></div>
         <div class="clean-info">
@@ -237,6 +220,24 @@
         </div>
       </div>
 
+      <div class="subpane" id="pane-mn-browsers">
+        <div class="ptitle">Limpeza por browser · cache, cookies e histórico</div>
+        <div class="repair-intro">
+          Remove dados acumulados de Chrome, Edge, Brave e Firefox: <b>cache</b> (libera espaço),
+          <b>cookies</b> (sessões e login), <b>histórico</b> e <b>sessões</b> salvas.
+          <span class="bench-note">Feche o browser antes de limpar. Cookies removem login — você precisará
+          entrar novamente nos sites.</span>
+        </div>
+        <div class="browser-bar">
+          <button class="btnG" id="btnBrowserScan"><span data-icon="scan"></span> Verificar browsers</button>
+          <span id="browserSummary" class="bench-note"></span>
+        </div>
+        <div id="browserGrid" class="browser-grid"></div>
+        <div class="repair-actions" id="browserActions" style="display:none">
+          <button class="btn-hero" id="btnBrowserClean"><span data-icon="broom"></span> Limpar selecionados</button>
+        </div>
+      </div>
+
       <div class="subpane" id="pane-mn-ferramentas">
         <div class="ptitle">Ferramentas rápidas · do Manual Mestre</div>
         <div class="repair-intro">
@@ -278,6 +279,14 @@
 
     <!-- HISTÓRICO -->
     <section class="page" id="page-historico">
+      <div class="ptitle">Registro do atendimento</div>
+      <p class="page-lead">Tudo que foi feito nesta máquina: lotes reversíveis, backups do estado
+        anterior e o relatório para entregar ao cliente.</p>
+      <div class="reg-acoes">
+        <button class="btn-hero" id="btnReport"><span data-icon="doc"></span> Relatório do cliente</button>
+        <button class="mbtn" id="btnBackup"><span data-icon="backup"></span> Backup &amp; restaurar</button>
+      </div>
+
       <!-- F5: Histórico de Performance -->
       <div class="ptitle">Histórico de performance</div>
       <div class="perf-hist-box">
@@ -306,11 +315,6 @@
 
     <!-- MEDIÇÃO (sub-abas: desempenho / fps / benchmark) -->
     <section class="page" id="page-medicao">
-      <nav class="subtabs" id="subMed">
-        <button class="active" data-sub="desempenho"><span data-icon="activity"></span>Desempenho</button>
-        <button data-sub="fps"><span data-icon="game"></span>FPS no jogo</button>
-        <button data-sub="benchmark"><span data-icon="gauge"></span>Benchmark</button>
-      </nav>
 
       <div class="subpane active" id="pane-md-desempenho">
         <div class="ptitle">Desempenho ao vivo</div>
@@ -438,15 +442,8 @@
   </main>
 
   <!-- ===== HUD DE COMANDO (navegação) ===== -->
-  <nav class="cmd mainnav" id="mainnav">
-    <a class="cn active" data-page="inicio"><span class="ic" data-icon="home"></span><span class="l">Núcleo</span></a>
-    <a class="cn" data-page="diagnostico"><span class="ic" data-icon="diag"></span><span class="l">Diagnóstico</span></a>
-    <a class="cn" data-page="otimizacoes"><span class="ic" data-icon="bolt"></span><span class="b" id="navOtim"></span><span class="l">Otimizações</span></a>
-    <a class="cn" data-page="jogos"><span class="ic" data-icon="gamepad"></span><span class="l">Jogos</span></a>
-    <a class="cn" data-page="gpu"><span class="ic" data-icon="gpu"></span><span class="l">GPU</span></a>
-    <a class="cn" data-page="manutencao"><span class="ic" data-icon="wrench"></span><span class="l">Manutenção</span></a>
-    <a class="cn" data-page="medicao"><span class="ic" data-icon="activity"></span><span class="l">Medição</span></a>
-  </nav>
+  <!-- montada por app.js a partir de NOS (5 nós: Núcleo · Sessão · Máquina · Ações · Registro) -->
+  <nav class="cmd mainnav" id="mainnav"></nav>
 </div>
 
 <!-- ===== OVERLAYS ===== -->
@@ -510,5 +507,7 @@
 
 <script src="icons.js"></script>
 <script src="app.js"></script>
+<script src="sessao.js"></script>
+<script src="disco.js"></script>
 </body>
 </html>
