@@ -16,6 +16,15 @@ import (
 // A arvore NAO e devolvida inteira: um disco cheio viraria dezenas de MB de
 // JSON. A UI pede um nivel por vez, ja ordenado do maior para o menor.
 
+// handleDiscoUnidades lista o que da para varrer.
+//
+// Nao reusa a lista do diagnostico de proposito: la so entra DRIVE_FIXED, que
+// para "saude do PC" esta certo. Aqui HD externo e pendrive precisam aparecer —
+// e onde mais mora arquivo esquecido.
+func (s *Server) handleDiscoUnidades(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, map[string]any{"unidades": winutil.Unidades()})
+}
+
 type discoVarrerReq struct {
 	Raiz string `json:"raiz"`
 }
@@ -91,6 +100,43 @@ func (s *Server) handleDiscoLimpar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, res)
 }
 
+type discoExcluirReq struct {
+	Caminhos    []string `json:"caminhos"`
+	ParaLixeira bool     `json:"para_lixeira"`
+	Confirmar   bool     `json:"confirmar"`
+}
+
+// handleDiscoExcluir apaga itens que o USUARIO escolheu no explorador.
+//
+// Diferente de /api/disco/limpar, aqui chega caminho — e por isso a validacao e
+// mais dura, nao mais frouxa: cada caminho tem que estar dentro da varredura
+// atual (limite de consentimento) e passar por PodeExcluirEscolhido, que recusa
+// sistema, raiz de unidade, perfil inteiro e junction. Sem varredura pronta o
+// endpoint recusa tudo, porque sem raiz nao existe limite.
+func (s *Server) handleDiscoExcluir(w http.ResponseWriter, r *http.Request) {
+	if !requirePOST(w, r) {
+		return
+	}
+	var req discoExcluirReq
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	raiz := winutil.DiscoMgr().RaizAtual()
+	if raiz == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"erro": "varra uma unidade primeiro — sem varredura o app não sabe o que você está apagando"})
+		return
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	res, err := winutil.ExcluirEscolhidos(req.Caminhos, raiz, req.ParaLixeira, req.Confirmar)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"erro": err.Error()})
+		return
+	}
+	writeJSON(w, 200, res)
+}
+
 type discoAbrirReq struct {
 	Caminho string `json:"caminho"`
 }
@@ -106,9 +152,18 @@ func (s *Server) handleDiscoAbrir(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	if !winutil.DiscoMgr().CaminhoDeAchado(winutil.RealUserSid(), req.Caminho) {
+	// Vale se veio da classificação OU se está dentro da varredura atual — o
+	// explorador precisa abrir a pasta que ele mesmo acabou de listar. O que
+	// continua barrado é caminho que o backend nunca produziu.
+	ok := winutil.DiscoMgr().CaminhoDeAchado(winutil.RealUserSid(), req.Caminho)
+	if !ok {
+		if raiz := winutil.DiscoMgr().RaizAtual(); raiz != "" {
+			ok = winutil.DentroDaVarredura(req.Caminho, raiz)
+		}
+	}
+	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"erro": "este caminho não veio da classificação do disco"})
+			"erro": "este caminho não veio da varredura nem da classificação do disco"})
 		return
 	}
 	if err := winutil.AbrirNoExplorer(req.Caminho); err != nil {

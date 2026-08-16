@@ -181,7 +181,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/sessao/reiniciar", s.handleSessaoReiniciar)
 	mux.HandleFunc("/api/sessao/reboot-visto", s.handleSessaoRebootVisto)
 	// Explorador de disco — onde o espaço foi parar.
+	mux.HandleFunc("/api/disco/unidades", s.handleDiscoUnidades)
 	mux.HandleFunc("/api/disco/varrer", s.handleDiscoVarrer)
+	mux.HandleFunc("/api/disco/excluir", s.handleDiscoExcluir)
 	mux.HandleFunc("/api/disco/status", s.handleDiscoStatus)
 	mux.HandleFunc("/api/disco/cancelar", s.handleDiscoCancelar)
 	mux.HandleFunc("/api/disco/arvore", s.handleDiscoArvore)
