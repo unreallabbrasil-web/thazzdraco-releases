@@ -57,18 +57,10 @@ type ApplyReport struct {
 
 var histMu sync.Mutex
 
-func dataDir() string {
-	base := os.Getenv("ProgramData")
-	if base == "" {
-		base = os.Getenv("LOCALAPPDATA") // evita o TEMP, que a regra de limpeza varre
-	}
-	if base == "" {
-		base = os.TempDir()
-	}
-	d := filepath.Join(base, "ThazzDraco")
-	os.MkdirAll(d, 0o755)
-	return d
-}
+// dataDir e writeFileAtomic vivem em winutil (fs.go) desde que a sessao passou a
+// gravar estado na mesma pasta — mantidos aqui como atalho para nao espalhar a
+// chamada em todo o motor.
+func dataDir() string { return winutil.DataDir() }
 
 func histPath() string { return filepath.Join(dataDir(), "historico.json") }
 
@@ -124,20 +116,7 @@ func persistBatch(batch BatchRecord) {
 	saveHistoryLocked(h)
 }
 
-// writeFileAtomic grava num arquivo temporario e renomeia por cima (atomico no
-// NTFS). Evita deixar o JSON truncado/corrompido se o processo morrer no meio da
-// escrita — protege o historico de undo e os backups, que sao a rede de seguranca.
-func writeFileAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
-}
+func writeFileAtomic(path string, data []byte) error { return winutil.WriteFileAtomic(path, data) }
 
 // ---- Log de operacoes (auditoria antes/depois) ------------------------------
 
@@ -213,6 +192,15 @@ func logApplied(ts string, r *Rule, undo *RuleUndo, freedMB float64) {
 // aplicadas e as que pedem consentimento sem `confirmar`). Cria 1 ponto de
 // restauracao no inicio e registra snapshots para undo exato.
 func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem string) ApplyReport {
+	return ApplyRulesProgresso(rules, ids, ctx, confirmar, origem, nil)
+}
+
+// ApplyRulesProgresso e o ApplyRules com aviso de andamento: `progresso` e
+// chamado antes de cada regra. Existe para a fila da sessao poder mostrar onde
+// esta sem quebrar a garantia de UM lote (e UM ponto de restauracao) por
+// chamada — que e o que mantem o undo por lote fazendo sentido.
+func ApplyRulesProgresso(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem string,
+	progresso func(id, titulo string, feitos, total int)) ApplyReport {
 	rep := ApplyReport{Erros: map[string]string{}}
 	byID := map[string]*Rule{}
 	for i := range rules {
@@ -244,8 +232,15 @@ func ApplyRules(rules []Rule, ids []string, ctx Ctx, confirmar bool, origem stri
 	}
 	logOp(fmt.Sprintf("=== %s  LOTE %s  origem=%s ===", batch.Quando, batch.ID, origem))
 
-	for _, id := range ids {
+	for i, id := range ids {
 		r := byID[id]
+		if progresso != nil {
+			titulo := id
+			if r != nil {
+				titulo = r.Titulo
+			}
+			progresso(id, titulo, i, len(ids))
+		}
 		if r == nil || r.Action == nil {
 			rep.Puladas = append(rep.Puladas, id)
 			continue
@@ -298,7 +293,9 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 		for _, v := range a.Valores {
 			snap := winutil.SnapshotValue(a.Hive, ctx.Sid, a.HkcuRealUser, a.Path, v.Name)
 			undo.Regs = append(undo.Regs, snap)
-			if err := applyRegValue(a.Hive, ctx.Sid, a.HkcuRealUser, a.Path, v); err != nil {
+			fallback, err := applyRegValue(a.Hive, ctx.Sid, a.HkcuRealUser, a.Path, v)
+			undo.Regs[len(undo.Regs)-1].Fallback = fallback
+			if err != nil {
 				return undo, 0, err
 			}
 		}
@@ -314,7 +311,9 @@ func applyAction(r *Rule, ctx Ctx) (*RuleUndo, float64, error) {
 			for _, v := range a.Valores {
 				snap := winutil.SnapshotValue(a.Hive, ctx.Sid, false, full, v.Name)
 				undo.Regs = append(undo.Regs, snap)
-				if err := applyRegValue(a.Hive, ctx.Sid, false, full, v); err != nil {
+				fallback, err := applyRegValue(a.Hive, ctx.Sid, false, full, v)
+				undo.Regs[len(undo.Regs)-1].Fallback = fallback
+				if err != nil {
 					return undo, 0, err
 				}
 			}
@@ -387,7 +386,7 @@ func ctxDesktop(ctx Ctx) bool {
 	return true // sem info: assume desktop
 }
 
-func applyRegValue(hive, sid string, hkcuReal bool, path string, v RegVal) error {
+func applyRegValue(hive, sid string, hkcuReal bool, path string, v RegVal) (fallback bool, err error) {
 	switch v.ValueType {
 	case "DWord":
 		n, _ := numOf(v.Value)
@@ -395,7 +394,7 @@ func applyRegValue(hive, sid string, hkcuReal bool, path string, v RegVal) error
 	case "String":
 		return winutil.WriteString(hive, sid, hkcuReal, path, v.Name, asString(v.Value))
 	}
-	return fmt.Errorf("value_type nao suportado: %s", v.ValueType)
+	return false, fmt.Errorf("value_type nao suportado: %s", v.ValueType)
 }
 
 // isSafeCleanup so libera pastas temporarias/cache (allowlist). Espelha

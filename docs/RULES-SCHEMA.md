@@ -38,6 +38,8 @@ não código. O scanner usa a regra para *detectar*, o motor para *recomendar* e
 | `action` | objeto/null | Como aplicar. `null` em regras consultivas. |
 | `undo` | objeto/null | Como reverter. Quase sempre `{ "tipo": "restore" }` (ver Snapshot). |
 | `orientacao` | string | Só em `consultivo`: instruções para o usuário (ex.: ativar XMP no BIOS). |
+| `depende_de` | string[] | Opcional. Ids de regras que precisam vir **antes**. |
+| `conflita_com` | string[] | Opcional. Ids de regras que fazem a mesma coisa (ou se anulam). |
 
 ## Os 3 modos
 
@@ -54,6 +56,31 @@ não código. O scanner usa a regra para *detectar*, o motor para *recomendar* e
 | 🟢 `verde` | Pode vir **marcado por padrão**. Base do "Otimização Segura em 1 clique". |
 | 🟡 `amarelo` | Vem **desmarcado**, com a contrapartida explicada. Opt-in consciente. |
 | 🔴 `vermelho` | Fica em seção **"Avançado"**, escondido por padrão, **exige consentimento** + aviso. |
+
+## Relações entre regras (`depende_de` / `conflita_com`)
+
+Campos **opcionais** — ausência significa "sem restrição", então toda regra antiga continua válida.
+Quem os interpreta é o plano da Sessão ([SESSAO](SESSAO.md) §5.4); fora dele, aplicar por
+Otimizações continua funcionando como sempre.
+
+- **`depende_de`** — a regra só faz sentido depois de outra. Isso é **ordem de execução**, não
+  estética: `power.processor-max-performance` grava valores em `SCHEME_CURRENT`, e se o esquema ativo
+  mudar depois, os valores ficaram no esquema velho. Por isso ela depende de
+  `power.high-performance`. No plano, o dependente é ordenado depois e fica **bloqueado** enquanto a
+  dependência não estiver marcada (ou já aplicada na máquina).
+- **`conflita_com`** — fazer as duas é redundante ou contraditório. Ex.: `mem.prefetch-superfetch-off`
+  (registro) e `svc.sysmain-off` (serviço) desligam o mesmo Superfetch por caminhos diferentes. O
+  plano mantém **uma**: vence maior impacto → menor risco → a que **não** pede reinício; a outra fica
+  bloqueada com o motivo. A relação é **simétrica** mesmo declarada de um lado só.
+
+**Duas regras de ouro ao declarar uma relação:**
+
+1. **Todo bloqueio precisa de saída.** O técnico tem que conseguir destravar o item (marcando a
+   dependência, ou desmarcando o vencedor do conflito). Por isso o conflito com uma regra **já
+   aplicada** na máquina *não* bloqueia nada — não haveria como desfazer o bloqueio.
+2. **Nada de ciclo.** `a` depender de `b` que depende de `a` trava os dois sem recurso. Há um teste
+   (`TestCatalogoSemCicloDeDependencia`) que quebra o build se isso for parar no catálogo — assim
+   como há um que confere se as relações apontam para regras que existem.
 
 ## `hardware_gate`
 
@@ -172,6 +199,8 @@ O executor **recusa** rodar uma regra que viole qualquer um destes:
 ## Versionamento
 
 - `schema_version` no topo do `rules.json`. Subir quando a estrutura de uma regra mudar.
+  - **1.0** → catálogo inicial. **1.1** → campos opcionais `depende_de` / `conflita_com`
+    (compatível: uma regra sem eles se comporta exatamente como antes).
 - Regras só são adicionadas/alteradas com referência à `parte` do guia — o guia é a fonte da verdade.
 - Score (antigo cálculo de 16 checks) passa a ser **derivado das regras** `acionavel` aplicadas vs.
   aplicáveis — fonte única, sem a duplicação PS/JS atual (ver [CONVENTIONS.md](CONVENTIONS.md#score-fonte-única-dívida-técnica)).

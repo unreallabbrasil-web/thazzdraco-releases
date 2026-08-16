@@ -258,6 +258,19 @@ type devmodeW struct {
 
 const enumCurrentSettings = 0xFFFFFFFF // ENUM_CURRENT_SETTINGS
 
+// DisplayModo devolve o modo de video atual: largura, altura e Hz. Serve para
+// carimbar o CENARIO de uma medicao — comparar FPS medido em 1080p com FPS
+// medido em 1440p nao e comparacao, e ilusao.
+func DisplayModo() (largura, altura, hz int) {
+	var cur devmodeW
+	cur.Size = uint16(unsafe.Sizeof(cur))
+	r1, _, _ := procEnumDisplay.Call(0, uintptr(enumCurrentSettings), uintptr(unsafe.Pointer(&cur)))
+	if r1 == 0 {
+		return 0, 0, 0
+	}
+	return int(cur.PelsWidth), int(cur.PelsHeight), int(cur.DisplayFrequency)
+}
+
 // displayRefresh -> (atualHz, maxHzParaAResolucaoAtual).
 func displayRefresh() (int, int) {
 	var cur devmodeW

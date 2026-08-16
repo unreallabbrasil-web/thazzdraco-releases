@@ -25,6 +25,29 @@ type Gargalo struct {
 // Diagnose roda todas as sondas e devolve os gargalos que impactam o FPS,
 // junto com um resumo. Tudo via leitura nativa — nenhum dado e estimado.
 func Diagnose(sid string) map[string]any {
+	g := Gargalos(sid)
+
+	cr, at, bo := 0, 0, 0
+	for _, x := range g {
+		switch x.Severidade {
+		case "critico":
+			cr++
+		case "atencao":
+			at++
+		case "bom":
+			bo++
+		}
+	}
+	return map[string]any{
+		"resumo":   map[string]any{"criticos": cr, "atencoes": at, "bons": bo, "total": len(g)},
+		"gargalos": g,
+	}
+}
+
+// Gargalos roda as sondas e devolve os achados ordenados por severidade. Existe
+// separado de Diagnose porque o plano da sessao precisa da lista tipada, nao do
+// mapa que a UI consome.
+func Gargalos(sid string) []Gargalo {
 	var g []Gargalo
 	g = appendIf(g, checkXMP())
 	g = appendIf(g, checkRefresh())
@@ -44,21 +67,7 @@ func Diagnose(sid string) map[string]any {
 		}
 	}
 
-	cr, at, bo := 0, 0, 0
-	for _, x := range g {
-		switch x.Severidade {
-		case "critico":
-			cr++
-		case "atencao":
-			at++
-		case "bom":
-			bo++
-		}
-	}
-	return map[string]any{
-		"resumo":   map[string]any{"criticos": cr, "atencoes": at, "bons": bo, "total": len(g)},
-		"gargalos": g,
-	}
+	return g
 }
 
 func appendIf(g []Gargalo, x *Gargalo) []Gargalo {

@@ -87,6 +87,13 @@ type Rule struct {
 	Action              *Action `json:"action"`
 	Undo                *Undo   `json:"undo"`
 	Orientacao          string  `json:"orientacao"`
+
+	// Relacoes entre regras (opcionais; ausencia = sem restricao).
+	//   DependeDe   — so faz sentido DEPOIS desta outra (o plano ordena e bloqueia).
+	//   ConflitaCom — fazer as duas e redundante ou contraditorio; o plano marca uma.
+	// Ver docs/RULES-SCHEMA.md.
+	DependeDe   []string `json:"depende_de,omitempty"`
+	ConflitaCom []string `json:"conflita_com,omitempty"`
 }
 
 type ruleFile struct {

@@ -108,6 +108,7 @@ Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Histórico completo em
 |---|---|
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | Arquitetura Go v4.0 (winutil / engine / server / web) |
 | [ROADMAP](docs/ROADMAP.md) | Status das fases (o que está pronto / pendente) |
+| [SESSAO](docs/SESSAO.md) | Arquitetura da **Sessão** (proposta v5.0): trilho de 7 etapas + plano |
 | [OPTIMIZATIONS](docs/OPTIMIZATIONS.md) | Catálogo das 61 regras + tweaks por jogo |
 | [RULES-SCHEMA](docs/RULES-SCHEMA.md) | Contrato das regras declarativas |
 | [SCAN-ENGINE](docs/SCAN-ENGINE.md) | Como a varredura/detecção funciona |

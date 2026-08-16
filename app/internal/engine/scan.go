@@ -25,6 +25,9 @@ type RuleView struct {
 	Detalhe             string `json:"detalhe"`
 	Aplicavel           bool   `json:"aplicavel"` // pode aplicar agora (tem action e esta pendente)
 	Tecnico             string `json:"tecnico"`   // o que a regra mexe (chave/valor/servico/powercfg)
+
+	DependeDe   []string `json:"depende_de,omitempty"`
+	ConflitaCom []string `json:"conflita_com,omitempty"`
 }
 
 // tecnicoOf descreve, em texto, o que a regra altera no sistema (transparencia).
@@ -85,6 +88,7 @@ func Scan(rules []Rule, ctx Ctx) ScanResult {
 			Descricao: r.Descricao, Tier: r.Tier, Modo: r.Modo, Impacto: r.Impacto,
 			RequerReboot: r.RequerReboot, RequerConsentimento: r.RequerConsentimento,
 			Orientacao: r.Orientacao, Estado: d.Estado, Detalhe: d.Detalhe,
+			DependeDe: r.DependeDe, ConflitaCom: r.ConflitaCom,
 		}
 		view.Aplicavel = r.Action != nil && d.Estado == "pendente"
 		view.Tecnico = tecnicoOf(r)

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "descricao": "Catalogo de regras de otimizacao do ThazzDraco Optimizer, derivado de docs/GUIA-OTIMIZACAO-GAMING.md. Contrato em docs/RULES-SCHEMA.md.",
   "rules": [
     {
@@ -22,6 +22,7 @@
       "tier": "verde", "modo": "acionavel", "impacto": "alto",
       "requer_reboot": false, "requer_consentimento": false, "toca_dados_pessoais": false,
       "hardware_gate": { "campo": "contexto.na_bateria", "op": "==", "valor": false },
+      "depende_de": ["power.high-performance"],
       "detect": { "tipo": "powercfg-setting", "sub": "SUB_PROCESSOR", "setting": "PROCTHROTTLEMIN", "esperado": 100 },
       "action": { "tipo": "powercfg", "comandos": [
         ["/setacvalueindex", "SCHEME_CURRENT", "SUB_PROCESSOR", "PROCTHROTTLEMIN", "100"],
@@ -37,6 +38,7 @@
       "tier": "verde", "modo": "acionavel", "impacto": "baixo",
       "requer_reboot": false, "requer_consentimento": false, "toca_dados_pessoais": false,
       "hardware_gate": null,
+      "depende_de": ["power.high-performance"],
       "detect": { "tipo": "powercfg-setting", "sub": "2a737441-1930-4402-8d77-b2bebba308a3", "setting": "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "esperado": 0 },
       "action": { "tipo": "powercfg", "comandos": [
         ["/setacvalueindex", "SCHEME_CURRENT", "2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "0"],
@@ -207,6 +209,7 @@
       "tier": "amarelo", "modo": "acionavel", "impacto": "baixo",
       "requer_reboot": true, "requer_consentimento": false, "toca_dados_pessoais": false,
       "hardware_gate": { "campo": "discos[0].tipo", "op": "==", "valor": "SSD" },
+      "conflita_com": ["svc.sysmain-off"],
       "detect": { "tipo": "registry", "hive": "HKLM", "path": "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", "valores": [ { "name": "EnablePrefetcher", "esperado": 0 }, { "name": "EnableSuperfetch", "esperado": 0 } ] },
       "action": { "tipo": "registry", "hive": "HKLM", "path": "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters", "valores": [ { "name": "EnablePrefetcher", "value": 0, "value_type": "DWord" }, { "name": "EnableSuperfetch", "value": 0, "value_type": "DWord" } ] },
       "undo": { "tipo": "restore" }
