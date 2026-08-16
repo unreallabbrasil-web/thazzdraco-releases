@@ -1,18 +1,38 @@
-name: Build & Release
+name: Build & Test
 
-# Dispara APENAS quando o arquivo VERSION muda na main.
-# Para lançar uma versão nova: mude o VERSION, faça git push.
+# ATENCAO — este workflow NAO publica release, e isso e deliberado.
+#
+# Ate a v5.0.0 ele criava o release sozinho quando o VERSION mudava na main:
+# apagava o release existente (`gh release delete`) e subia um build proprio, so
+# com o .exe. Isso quebrou a v5.0.0 na pratica — o release assinado publicado da
+# maquina do autor foi destruido 48s depois do merge, e o app de todo cliente
+# passou a recusar a atualizacao com "a atualizacao nao veio assinada".
+#
+# Desde a v5.0.0 o app so instala atualizacao ASSINADA (Ed25519, chave publica
+# embutida no binario — ver docs/DISTRIBUICAO-CONFIANCA.md). Publicar daqui
+# exigiria a chave privada nos Secrets do GitHub, e isso derrubaria a unica
+# garantia que a assinatura oferece: se o repositorio for comprometido, o
+# atacante NAO consegue assinar. Chave dentro do CI = atacante assina.
+#
+# Publicar e feito na maquina de quem tem a chave:
+#
+#     cd app; .\publicar.ps1 5.0.1 -Notas "o que mudou"
+#
+# O que sobra aqui e o que o CI faz bem: garantir que a main compila e passa nos
+# testes.
+
 on:
   push:
     branches: [main]
-    paths:
-      - 'app/VERSION'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
 
     steps:
@@ -25,22 +45,30 @@ jobs:
           go-version: '1.26'
           cache-dependency-path: app/go.sum
 
-      - name: Ler versão
-        id: ver
-        shell: pwsh
-        run: |
-          $v = (Get-Content app/VERSION).Trim()
-          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
-          echo "Versão: $v"
-
       - name: Gerar recurso (icone + manifesto + versao)
         working-directory: app
         shell: pwsh
-        # Regenera resource.syso com a versao do arquivo VERSION — senao o exe do
-        # Release herda a versao antiga do resource.syso commitado (metadados stale).
         run: python resgen.py
 
-      - name: Build ThazzDraco.exe
+      - name: go vet
+        working-directory: app
+        shell: pwsh
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: go vet ./...
+
+      - name: Testes
+        working-directory: app
+        shell: pwsh
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: go test ./... -count=1
+
+      - name: Build
         working-directory: app
         shell: pwsh
         env:
@@ -49,33 +77,16 @@ jobs:
           CGO_ENABLED: 0
         run: |
           go build -ldflags="-H windowsgui -s -w" -o ThazzDraco.exe .
-          Write-Host "Build concluido: $(Get-Item ThazzDraco.exe | Select-Object -ExpandProperty Length) bytes"
+          $tam = (Get-Item ThazzDraco.exe).Length
+          Write-Host "Build OK: $tam bytes"
 
-      - name: Criar Release no GitHub
+      # A ferramenta de publicacao tambem precisa continuar compilando, senao o
+      # release quebra so na hora de publicar.
+      - name: Build da ferramenta de assinatura
+        working-directory: app
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $version = "${{ steps.ver.outputs.VERSION }}"
-          $tag = "v$version"
-
-          # Notas de release: commits desde a tag anterior, ou todo o log se for a 1ª
-          $prevTag = git describe --tags --abbrev=0 HEAD~1 2>$null
-          if ($prevTag) {
-            $lines = git log "$prevTag..HEAD" --format="• %s" 2>$null
-          } else {
-            $lines = git log --format="• %s" -10 2>$null
-          }
-          $notes = if ($lines) { ($lines | Where-Object { $_ -match '\S' }) -join "`n" } else { "ThazzDraco Optimizer v$version" }
-
-          # Remove release anterior com a mesma tag, se houver
-          gh release delete $tag --yes 2>$null
-
-          # Cria o release com o .exe
-          gh release create $tag `
-            --title "ThazzDraco Optimizer v$version" `
-            --notes $notes `
-            --latest `
-            "app/ThazzDraco.exe#ThazzDraco.exe"
-
-          Write-Host "Release $tag criado com sucesso!"
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: go build -o assinar.exe ./cmd/assinar
