@@ -578,13 +578,13 @@
     {
       "id": "win.widgets-off",
       "parte": 1, "categoria": "Windows",
-      "titulo": "Remover Widgets da barra de tarefas (Win11)",
-      "descricao": "Oculta o botao de Widgets (feed de noticias e clima da MSN) da barra de tarefas do Windows 11, eliminando o processo de fundo correspondente.",
+      "titulo": "Desativar Widgets (Win11)",
+      "descricao": "Desliga o painel de Widgets (feed de noticias e clima da MSN) e o processo de fundo dele. Usa a politica oficial do Windows porque o valor equivalente no perfil do usuario (TaskbarDa) e PROTEGIDO pelo sistema: recusa escrita ate para o proprio dono, com ou sem administrador.",
       "tier": "verde", "modo": "acionavel", "impacto": "baixo",
-      "requer_reboot": false, "requer_consentimento": false, "toca_dados_pessoais": false,
+      "requer_reboot": true, "requer_consentimento": false, "toca_dados_pessoais": false,
       "hardware_gate": null,
-      "detect": { "tipo": "registry", "hive": "HKCU", "hkcu_real_user": true, "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "valores": [ { "name": "TaskbarDa", "esperado": 0 } ] },
-      "action": { "tipo": "registry", "hive": "HKCU", "hkcu_real_user": true, "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "valores": [ { "name": "TaskbarDa", "value": 0, "value_type": "DWord" } ] },
+      "detect": { "tipo": "registry", "hive": "HKLM", "path": "SOFTWARE\\Policies\\Microsoft\\Dsh", "valores": [ { "name": "AllowNewsAndInterests", "esperado": 0 } ] },
+      "action": { "tipo": "registry", "hive": "HKLM", "path": "SOFTWARE\\Policies\\Microsoft\\Dsh", "valores": [ { "name": "AllowNewsAndInterests", "value": 0, "value_type": "DWord" } ] },
       "undo": { "tipo": "restore" }
     },
     {
