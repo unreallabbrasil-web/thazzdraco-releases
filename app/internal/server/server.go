@@ -27,8 +27,30 @@ import (
 	"thazzdraco/internal/winutil"
 )
 
-// sessionCookie é o nome do cookie que porta o token de sessão da janela.
+// sessionCookie é o PREFIXO do cookie que porta o token de sessão da janela.
+//
+// O nome final leva a porta ("tz_session_53218"), e isso não é enfeite: cookie
+// NÃO tem porta no escopo (RFC 6265 §8.5). Duas instâncias do app em portas
+// diferentes de 127.0.0.1 dividiam o mesmo cookie `tz_session` — a segunda a
+// carregar sobrescrevia o token da primeira, e a janela da primeira passava a
+// receber 403 "sessao nao autenticada" em TODA chamada, para sempre, porque a
+// tela não recarrega sozinha.
+//
+// Acontecia no caso mais comum que existe: a pessoa clica duas vezes no .exe
+// porque o primeiro clique demorou (SmartScreen, UAC).
 const sessionCookie = "tz_session"
+
+// nomeCookie devolve o nome do cookie desta instância.
+func (s *Server) nomeCookie() string {
+	if s.porta == "" {
+		return sessionCookie
+	}
+	return sessionCookie + "_" + s.porta
+}
+
+// DefinirPorta informa ao servidor em que porta ele está atendendo, para que o
+// cookie de sessão seja exclusivo desta instância.
+func (s *Server) DefinirPorta(p string) { s.porta = p }
 
 type Server struct {
 	rules   []engine.Rule
@@ -36,6 +58,7 @@ type Server struct {
 	web     http.Handler
 	version string
 	token   string // segredo por-sessão exigido em todo /api/ (gerado no boot)
+	porta   string // porta desta instância — entra no nome do cookie
 
 	mu        sync.Mutex // serializa operacoes do motor (scan/apply/registro)
 	opMu      sync.Mutex // serializa operacoes destrutivas pesadas (debloat/limpeza/driver)
@@ -286,7 +309,7 @@ func (s *Server) tokenOK(r *http.Request) bool {
 	if h := r.Header.Get("X-TZ-Token"); h != "" {
 		return subtle.ConstantTimeCompare([]byte(h), []byte(s.token)) == 1
 	}
-	c, err := r.Cookie(sessionCookie)
+	c, err := r.Cookie(s.nomeCookie())
 	if err != nil {
 		return false
 	}
@@ -298,7 +321,7 @@ func (s *Server) tokenOK(r *http.Request) bool {
 // serve em http://127.0.0.1 (o navegador descartaria um cookie Secure em http).
 func (s *Server) setSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
+		Name:     s.nomeCookie(),
 		Value:    s.token,
 		Path:     "/",
 		HttpOnly: true,

@@ -4,6 +4,36 @@ Histórico de versões do ThazzDraco Optimizer. Formato baseado em *Keep a Chang
 
 ---
 
+## [5.0.3] — 403 no PC do cliente: uma instância por vez (ago/2026)
+
+Relato: *"fui usar em outro computador e deu um erro 403. Tem que funcionar sempre, a ideia é
+colocar o .exe no PC da pessoa e arrumar."*
+
+**Causa: cookie não tem porta no escopo** (RFC 6265 §8.5). O app sobe numa porta efêmera e guarda o
+token de sessão num cookie chamado `tz_session` em `127.0.0.1`. Duas instâncias em portas diferentes
+dividiam o **mesmo** cookie: a segunda a carregar sobrescrevia o token da primeira, e a janela da
+primeira passava a receber `403 sessao nao autenticada` em toda chamada — para sempre, porque a tela
+é uma SPA e não recarrega sozinha.
+
+E abrir duas vezes não é descuido: no PC de um cliente o primeiro clique demora (SmartScreen, UAC),
+a pessoa acha que não pegou e clica de novo.
+
+Três camadas, para que o 403 não volte por outro caminho:
+
+- **Uma instância por vez** (mutex nomeado do Windows, que o sistema libera sozinho se o processo
+  morrer — arquivo de lock deixaria o app travado depois de um crash). O segundo clique passou a
+  abrir a janela da instância que já existe, que é o que a pessoa queria ao clicar de novo.
+- **Cookie exclusivo da porta** (`tz_session_53218`), para o caso de duas instâncias coexistirem
+  mesmo assim.
+- **A tela se recupera sozinha**: um 403 dispara UMA recarga (é o servidor que carimba o cookie na
+  carga da página). Se falhar de novo, aí mostra o motivo em português em vez de "HTTP 403" — laço
+  de recarga só esconderia a causa real atrás de uma tela piscando.
+
+O `internal/server`, que não tinha teste nenhum, ganhou os primeiros: o cookie carimbado é o mesmo
+que a verificação procura, e cookie de outra instância não vale para esta.
+
+---
+
 ## [Não lançado] — Segurança: atualização só instala se for assinada (ago/2026)
 
 Fecha o achado mais grave do checkup: o app baixava um `.exe` do repositório de releases,

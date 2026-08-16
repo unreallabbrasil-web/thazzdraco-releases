@@ -66,6 +66,23 @@ func main() {
 		return
 	}
 
+	// Uma instância por vez. Duas subiam dois servidores em portas diferentes e
+	// se atropelavam no cookie de sessão (403 na janela mais antiga). Aqui o
+	// segundo clique vira "traz a janela que já existe", que é o que a pessoa
+	// queria quando clicou de novo. Ver winutil/instancia.go.
+	if !*headless {
+		unica, urlViva := winutil.InstanciaUnica()
+		if !unica {
+			if urlViva != "" {
+				openWindow(urlViva)
+			} else {
+				messageBox("O ThazzDraco já está aberto.\n\nSe você não está vendo a janela, feche o " +
+					"programa pela Barra de Tarefas e abra de novo.")
+			}
+			return
+		}
+	}
+
 	rules, err := engine.LoadRules()
 	if err != nil {
 		fatal(err)
@@ -83,6 +100,16 @@ func main() {
 		fatal(err)
 	}
 	url := fmt.Sprintf("http://%s/", ln.Addr().String())
+	// O cookie de sessão precisa ser exclusivo desta porta: cookie não tem porta
+	// no escopo, então duas instâncias em portas diferentes se atropelavam e a
+	// janela mais antiga passava a levar 403 em tudo. Ver server.nomeCookie().
+	if _, p, err := net.SplitHostPort(ln.Addr().String()); err == nil {
+		srv.DefinirPorta(p)
+	}
+	// Onde estamos atendendo, para um segundo clique no .exe abrir esta janela
+	// em vez de subir outro servidor.
+	winutil.GravarURLInstancia(url)
+	defer winutil.LimparURLInstancia()
 
 	httpSrv := &http.Server{
 		Handler: srv.Handler(),

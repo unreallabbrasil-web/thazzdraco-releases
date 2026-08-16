@@ -32,15 +32,37 @@ function escHtml(s) { return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;
 function pluralWord(n, singular, plural) { return n === 1 ? singular : (plural || singular + "s"); }
 
 /* ---- API ----------------------------------------------------------------- */
+// Recarrega no máximo UMA vez por 403: se o servidor recusar de novo depois da
+// recarga, o problema não é cookie velho, e um laço de recarga só esconderia a
+// causa real atrás de uma tela piscando.
+let _recarregouPor403 = false;
+try { if (sessionStorage.getItem("tz_recarga_403")) { _recarregouPor403 = true; sessionStorage.removeItem("tz_recarga_403"); } } catch (e) {}
+
 async function api(path, body) {
   const opt = body
     ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
     : {};
   const r = await fetch(path, opt);
   if (!r.ok) {
+    // 403 = o cookie de sessão desta janela não vale mais para este núcleo.
+    // Acontece quando outra instância do app rodou e sobrescreveu o cookie, ou
+    // quando a página voltou do cache do navegador sem passar pelo servidor
+    // (que é quem carimba o cookie). Recarregar resolve — o servidor recarimba
+    // na carga da página. Sem isto a tela fica morta pedindo "403" para sempre,
+    // e a pessoa na frente do PC não tem como adivinhar que era só atualizar.
+    if (r.status === 403 && !_recarregouPor403) {
+      _recarregouPor403 = true;
+      try { sessionStorage.setItem("tz_recarga_403", "1"); } catch (e) {}
+      location.reload();
+      await new Promise(() => {}); // trava aqui: a página está indo embora
+    }
     // tenta extrair a mensagem real do servidor em vez de só "HTTP 500"
     let msg = "HTTP " + r.status;
     try { const j = await r.json(); if (j && (j.erro || j.error)) msg = j.erro || j.error; } catch (e) {}
+    if (r.status === 403) {
+      msg = "Esta janela perdeu a sessão do núcleo. Feche o ThazzDraco e abra de novo — " +
+            "provavelmente há outra janela dele aberta.";
+    }
     throw new Error(msg);
   }
   return r.json();
