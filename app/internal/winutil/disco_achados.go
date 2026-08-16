@@ -42,6 +42,8 @@ type Achado struct {
 	Aviso       string   `json:"aviso,omitempty"`
 	Atalho      string   `json:"atalho,omitempty"` // página do app que já faz isso
 	Recomendado bool     `json:"recomendado"`
+	// Prova: por que dá (ou não dá) para apagar isto. Ver disco_veredito.go.
+	Prova Evidencia `json:"prova"`
 }
 
 // ArquivoAchado e um arquivo listado num achado de relatorio (instaladores).
@@ -66,6 +68,13 @@ type catAchado struct {
 	recomendado                                bool
 	pastas                                     []string // medidas na árvore da varredura
 	arquivos                                   []string // medidos com stat (pagefile etc.)
+
+	// Evidencia (docs/DISCO-LIMPEZA.md §11). Sem isto o app so consegue dizer
+	// "cache regeneravel, confie em mim" — e confianca nao e o que falta.
+	dono    string // nome do programa dono, como o usuário o chama ("npm")
+	donoExe string // executável para procurar no PATH e saber se ele existe
+	volta   string // o que acontece se apagar ("volta no próximo `npm install`")
+	detalhe string // "store" | "modelos": a categoria abre item por item
 }
 
 // montaCatalogo resolve os caminhos para o usuario real desta maquina.
@@ -95,36 +104,43 @@ func montaCatalogo(sid string) []catAchado {
 		// ---- Cache regenerável: o app pode oferecer limpar --------------------
 		{
 			id: "cache-npm", nome: "Cache do npm", classe: ClasseLimpavel, recomendado: true,
+			dono: "npm", donoExe: "npm", volta: "volta sozinho no próximo `npm install`",
 			descricao: "Pacotes JavaScript já baixados. O próximo `npm install` rebaixa o que precisar.",
 			pastas:    []string{la("npm-cache")},
 		},
 		{
 			id: "cache-pip", nome: "Cache do pip", classe: ClasseLimpavel, recomendado: true,
+			dono: "pip", donoExe: "pip", volta: "volta sozinho no próximo `pip install`",
 			descricao: "Pacotes Python já baixados. O próximo `pip install` rebaixa o que precisar.",
 			pastas:    []string{la("pip", "cache")},
 		},
 		{
 			id: "cache-go", nome: "Cache de build do Go", classe: ClasseLimpavel, recomendado: true,
+			dono: "Go", donoExe: "go", volta: "a próxima compilação refaz, mais lenta uma vez só",
 			descricao: "Resultados de compilação. A próxima compilação refaz — fica mais lenta uma vez só.",
 			pastas:    []string{la("go-build")},
 		},
 		{
 			id: "cache-yarn", nome: "Cache do Yarn", classe: ClasseLimpavel, recomendado: true,
+			dono: "Yarn", donoExe: "yarn", volta: "volta sozinho no próximo install",
 			descricao: "Pacotes já baixados pelo Yarn; voltam sozinhos no próximo install.",
 			pastas:    []string{la("Yarn", "Cache"), pj(".yarn", "cache")},
 		},
 		{
 			id: "cache-gradle", nome: "Cache do Gradle", classe: ClasseLimpavel, recomendado: true,
+			dono: "Gradle", donoExe: "gradle", volta: "volta no próximo build",
 			descricao: "Dependências de projetos Java/Android; voltam no próximo build.",
 			pastas:    []string{pj(".gradle", "caches")},
 		},
 		{
 			id: "cache-cargo", nome: "Cache do Cargo (Rust)", classe: ClasseLimpavel, recomendado: true,
+			dono: "Cargo", donoExe: "cargo", volta: "volta no próximo build",
 			descricao: "Fontes e pacotes baixados do crates.io; voltam no próximo build.",
 			pastas:    []string{pj(".cargo", "registry", "cache"), pj(".cargo", "registry", "src")},
 		},
 		{
 			id: "cache-nuget", nome: "Pacotes do NuGet", classe: ClasseLimpavel,
+			dono: "NuGet", donoExe: "dotnet", volta: "volta no próximo restore",
 			descricao: "Pacotes .NET baixados. Some e o próximo restore rebaixa.",
 			aviso:     "Sem internet no momento do build, o projeto não compila até rebaixar.",
 			pastas:    []string{pj(".nuget", "packages")},
@@ -155,13 +171,15 @@ func montaCatalogo(sid string) []catAchado {
 		// ---- Dado do usuário: SÓ RELATÓRIO -----------------------------------
 		{
 			id: "modelos-hf", nome: "Modelos de IA (Hugging Face)", classe: ClasseRelatorio,
+			dono: "Hugging Face", volta: "não volta sozinho: é baixar tudo de novo", detalhe: "modelos",
 			descricao: "Modelos que você baixou de propósito. São GB que levam muito tempo para voltar — o app não apaga.",
-			pastas:    []string{pj(".cache", "huggingface")},
+			pastas:    []string{pj(".cache", "huggingface", "hub")},
 		},
 		{
 			id: "modelos-ollama", nome: "Modelos de IA (Ollama)", classe: ClasseRelatorio,
+			dono: "Ollama", donoExe: "ollama", volta: "não volta sozinho: é baixar o modelo de novo", detalhe: "modelos",
 			descricao: "Acervo de modelos baixados, não cache. Quem decide o que sai é você.",
-			pastas:    []string{pj(".ollama")},
+			pastas:    []string{pj(".ollama", "models", "blobs")},
 		},
 		{
 			id: "downloads", nome: "Downloads", classe: ClasseRelatorio,
@@ -170,7 +188,8 @@ func montaCatalogo(sid string) []catAchado {
 		},
 		{
 			id: "dados-apps", nome: "Dados de apps da Store", classe: ClasseRelatorio,
-			descricao: "Cada app da Microsoft Store guarda dados aqui. Apagar em bloco quebra os apps.",
+			dono: "Microsoft Store", volta: "não volta: é login e configuração de cada app", detalhe: "store",
+			descricao: "Cada app da Store guarda dados aqui — e a pasta NÃO some quando o app é desinstalado.",
 			pastas:    []string{la("Packages")},
 		},
 
@@ -222,6 +241,7 @@ func (g *gerenciadorDisco) Achados(sid string) (*ResultadoAchados, bool) {
 			ID: c.id, Nome: c.nome, Classe: c.classe, Descricao: c.descricao,
 			Aviso: c.aviso, Atalho: c.atalho, Recomendado: c.recomendado,
 		}
+		usoDias := -1
 		for _, p := range c.pastas {
 			if p == "" {
 				continue
@@ -233,6 +253,11 @@ func (g *gerenciadorDisco) Achados(sid string) (*ResultadoAchados, bool) {
 			a.Bytes += no.Bytes
 			a.Arquivos += no.Arquivos
 			a.Caminhos = append(a.Caminhos, p)
+			// Categoria com várias pastas: vale a mais recente das duas — se
+			// qualquer uma foi usada hoje, a categoria foi usada hoje.
+			if no.Recente >= 0 && (usoDias < 0 || no.Recente < usoDias) {
+				usoDias = no.Recente
+			}
 		}
 		for _, f := range c.arquivos {
 			st, err := os.Stat(f)
@@ -246,6 +271,7 @@ func (g *gerenciadorDisco) Achados(sid string) (*ResultadoAchados, bool) {
 		if len(a.Caminhos) == 0 {
 			continue // não existe nesta máquina: não polui a tela
 		}
+		a.Prova = avaliar(c, &a, usoDias)
 		if a.Classe == ClasseLimpavel {
 			out.LiberavelJa += a.Bytes
 		}

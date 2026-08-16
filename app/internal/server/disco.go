@@ -100,6 +100,22 @@ func (s *Server) handleDiscoLimpar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, res)
 }
 
+// handleDiscoDetalhar abre uma categoria agregada item por item.
+//
+// Existe por causa da pergunta que nenhuma tela respondia: "Dados de apps da
+// Store, 26,8 GB" abre uma pasta com 134 nomes ilegiveis. Quebrado por app, com
+// o dono e a ultima utilizacao, vira uma lista de decisoes obvias.
+func (s *Server) handleDiscoDetalhar(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	itens, ok := winutil.DiscoMgr().Detalhar(winutil.RealUserSid(), id)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"erro": "esta categoria não abre em itens, ou não há varredura pronta"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "itens": itens})
+}
+
 type discoExcluirReq struct {
 	Caminhos    []string `json:"caminhos"`
 	ParaLixeira bool     `json:"para_lixeira"`
