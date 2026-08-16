@@ -26,10 +26,20 @@ import (
 func main() {
 	gerar := flag.String("gerar-chaves", "", "gera o par e grava a chave privada neste caminho")
 	assinar := flag.String("assinar", "", "arquivo a assinar")
+	conferir := flag.String("conferir", "", "confere o arquivo contra o .sig, como o cliente faria")
 	chave := flag.String("chave", "", "caminho da chave privada")
 	flag.Parse()
 
 	switch {
+	case *conferir != "":
+		// Usa a MESMA chave publica embutida no produto. Se falhar aqui, o
+		// cliente tambem recusaria — melhor descobrir antes de publicar.
+		if err := winutil.VerificarAssinatura(*conferir, *conferir+".sig"); err != nil {
+			morre(err)
+		}
+		d, _ := winutil.DigestArquivo(*conferir)
+		fmt.Printf("assinatura confere (sha256 %x)\n", d[:8])
+
 	case *gerar != "":
 		pub, err := winutil.GerarParDeChaves(*gerar)
 		if err != nil {
