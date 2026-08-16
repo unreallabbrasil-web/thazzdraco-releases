@@ -106,9 +106,18 @@ if ($Simular) {
 # GitHub, que pode nao ter este codigo. A tag tem que apontar para o commit de
 # onde o binario saiu, senao daqui a um ano ninguem sabe o que foi publicado.
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
+
+# As notas vao por ARQUIVO, nao por argumento: acento passado direto do
+# PowerShell 5.1 para um exe nativo vira mojibake, e esse texto e o que o
+# cliente le na janela de atualizacao.
+$arqNotas = Join-Path $env:TEMP "thazzdraco-notas-$Versao.md"
+[System.IO.File]::WriteAllText($arqNotas, $Notas, (New-Object System.Text.UTF8Encoding($false)))
+
 gh release create "v$Versao" $exe $sig --repo $repo --target $branch `
-    --title "ThazzDraco Optimizer v$Versao" --notes $Notas
-if ($LASTEXITCODE -ne 0) { throw "gh release create falhou" }
+    --title "ThazzDraco Optimizer v$Versao" --notes-file $arqNotas
+$rc = $LASTEXITCODE
+Remove-Item $arqNotas -Force -ErrorAction SilentlyContinue
+if ($rc -ne 0) { throw "gh release create falhou" }
 
 # --------------------------------------------------------------- 6. confirmar
 Passo 6 "Conferindo o que ficou publicado..."
