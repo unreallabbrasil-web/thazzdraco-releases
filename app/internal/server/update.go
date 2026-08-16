@@ -56,11 +56,14 @@ func (s *Server) handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
 	dl.total = 0
 	dl.tmpExe = ""
 	dl.errMsg = ""
-	url := info.DownloadURL
 	dl.mu.Unlock()
 
 	go func() {
-		tmpExe, err := winutil.DownloadExe(url, func(downloaded, total int64) {
+		// Baixa E VERIFICA A ASSINATURA antes de marcar como pronto. O apply troca
+		// o próprio exe e relança COMO ADMINISTRADOR — instalar binário não
+		// verificado seria entregar a máquina do cliente a quem controlar o
+		// repositório de releases.
+		tmpExe, err := winutil.BaixarAtualizacaoVerificada(info, func(downloaded, total int64) {
 			dl.mu.Lock()
 			dl.downloaded = downloaded
 			dl.total = total

@@ -103,6 +103,47 @@ SmartScreen no primeiro PC, que é exatamente a vergonha na frente do cliente.
 
 ---
 
+## 4.1. Assinatura das ATUALIZAÇÕES (feito — e é outra coisa)
+
+Não confundir com a seção acima. Assinatura de código (certificado pago) resolve o **SmartScreen**.
+Esta aqui resolve um problema mais grave e **custou zero**: o app se atualizava sozinho **sem
+verificar nada**.
+
+**O risco:** o app baixa um `.exe` do repositório de releases, substitui o próprio binário e relança
+**como administrador**. Sem verificação, quem tomasse aquele repositório executava código como admin
+na máquina de todos os clientes.
+
+**Por que publicar o SHA-256 não resolveria:** se o repositório for comprometido, o atacante publica
+o `.exe` dele **e** o hash dele. Hash ao lado do arquivo só prova que o arquivo é o que quem publicou
+quis publicar — e HTTPS já cobre corrupção no caminho.
+
+**O que foi feito:** assinatura **Ed25519** com a chave pública embutida no binário.
+
+- A **chave privada fica fora do repositório** (`E:\CLAUDE AI\_chaves\thazzdraco-update.key`, ou onde
+  `THAZZDRACO_UPDATE_KEY` apontar). Quem tiver essa chave assina atualizações que todo cliente
+  instala como admin — ela vale mais que o código.
+- O `build.ps1` assina automaticamente e gera `dist\ThazzDraco.exe.sig`. **Publique os dois** no
+  release.
+- O app **recusa atualizar** se: o build não tiver chave pública embutida, o release não tiver `.sig`,
+  ou a assinatura não conferir. Recusar é o padrão.
+- Repositório comprometido → o atacante não consegue forjar a assinatura → o cliente não instala.
+
+**Se a chave privada vazar ou se perder:** gere outro par, embuta a nova pública e publique um build
+novo. Isso invalida as assinaturas antigas de propósito — é o caminho de revogação. Quem estiver numa
+versão anterior precisará atualizar à mão uma vez.
+
+**Limite honesto:** isso protege as atualizações **a partir do build que tem a verificação**. Quem
+estiver rodando uma versão anterior ainda instala sem checar — a proteção começa quando o cliente
+chega neste build.
+
+```powershell
+# gerar o par (uma vez; a privada NUNCA entra no repositório)
+go run ./cmd/assinar -gerar-chaves "E:\CLAUDE AI\_chaves\thazzdraco-update.key"
+
+# assinar à mão, se precisar fora do build.ps1
+go run ./cmd/assinar -assinar dist\ThazzDraco.exe -chave "E:\CLAUDE AI\_chaves\thazzdraco-update.key"
+```
+
 ## 5. Playbook de campo — o técnico libera rápido e sem improviso
 
 Enquanto não há assinatura, **o técnico vai precisar liberar manualmente** em PCs novos. Faça isso

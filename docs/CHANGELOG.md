@@ -4,6 +4,28 @@ Histórico de versões do ThazzDraco Optimizer. Formato baseado em *Keep a Chang
 
 ---
 
+## [Não lançado] — Segurança: atualização só instala se for assinada (ago/2026)
+
+Fecha o achado mais grave do checkup: o app baixava um `.exe` do repositório de releases,
+**substituía o próprio binário e relançava como administrador — sem verificar nada**. Quem tomasse
+aquele repositório executava código como admin na máquina de todos os clientes.
+
+- **Assinatura Ed25519 com a chave pública embutida no binário.** A privada fica fora do repositório
+  (`THAZZDRACO_UPDATE_KEY`, ou `E:\CLAUDE AI\_chaves\thazzdraco-update.key`).
+- **Publicar o SHA-256 não resolveria**: com o repositório comprometido, o atacante publica o exe
+  dele *e* o hash dele. Hash ao lado do arquivo só prova o que quem publicou quis publicar; HTTPS já
+  cobre corrupção no caminho. O que quebra o ataque é a assinatura, porque a chave privada não está lá.
+- **Recusar é o padrão.** Não instala se: o build não tiver chave pública, o release não tiver `.sig`,
+  ou a assinatura não conferir. O binário baixado é apagado em caso de falha.
+- `build.ps1` assina no fim do build e gera `dist\ThazzDraco.exe.sig` — publique os dois no release.
+- Ferramenta de publicação em `./cmd/assinar`, **fora do binário do produto**: o app embute manifesto
+  de admin, e um passo de build não deve pedir elevação.
+- 6 testes, incluindo os dois cenários de ataque: binário trocado mantendo a assinatura antiga, e
+  binário assinado com outra chave. Ambos recusados.
+
+**Limite honesto:** protege as atualizações a partir deste build. Quem estiver numa versão anterior
+ainda instala sem checar — a proteção começa quando o cliente chega aqui.
+
 ## [Não lançado] — Disco: a limpeza (fatia L3, ago/2026)
 
 O explorador passou a **liberar espaço**, não só apontar. É o único código do app que apaga arquivo —

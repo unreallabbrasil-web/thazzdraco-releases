@@ -44,6 +44,8 @@ func main() {
 	scanMode := flag.Bool("scan", false, "roda a varredura e imprime JSON e sai")
 	headless := flag.Bool("headless", false, "sobe o servidor sem abrir janela nem elevar (teste)")
 	port := flag.Int("port", 0, "porta fixa (0 = efemera)")
+	// As ferramentas de publicacao (gerar chaves, assinar release) vivem em
+	// ./cmd/assinar — fora do produto, que embute manifesto de admin.
 	flag.Parse()
 
 	switch {
