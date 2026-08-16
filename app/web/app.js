@@ -3575,6 +3575,8 @@ function applyPreset(id) {
 /* ---- Atualização (painel NVIDIA-style) ------------------------------------ */
 let _appVersion = "";
 let _updateInfo = null;
+let _updateCheckedAt = 0;   // quando o último resultado chegou (Date.now)
+const UPD_FRESCO_MS = 60_000;
 
 // Bloco "Instalada vX -> Disponível vY" reusado no painel (parado) e durante o download.
 function updVersionsHtml(curV, newV) {
@@ -3600,7 +3602,14 @@ function openUpdatePanel() {
   const panel = $("#updPanel"), bg = $("#updPanelBg"); if (!panel) return;
   const verEl = $("#updCurVer"); if (verEl) verEl.textContent = _appVersion ? "v" + _appVersion : "v—";
   panel.classList.add("open"); bg.classList.add("open");
-  if (_updateInfo === null) forceCheckUpdate();
+  // Abrir este painel É a pergunta "tem versão nova?" — responder com um
+  // resultado de horas atrás é responder outra coisa. O check de fundo só roda a
+  // cada 15min (e o Go guarda por 4h), então um release publicado agora ficava
+  // invisível, e pior: um erro antigo ("não veio assinada") ficava colado na tela
+  // mesmo depois de o release ser corrigido. Aqui a gente pergunta de novo.
+  // O resultado recente é reaproveitado só para não bater no GitHub a cada
+  // abre-e-fecha do painel (o limite deles é 60 chamadas por hora).
+  if (_updateInfo === null || Date.now() - _updateCheckedAt > UPD_FRESCO_MS) forceCheckUpdate();
   else renderUpdatePanel();
 }
 
@@ -3660,13 +3669,18 @@ async function startInstall(updateInfo) {
   try { await api("/api/update/install", {}); }
   catch (e) {
     body.innerHTML = `<div class="upd-status">${IC("err")}<div><b>Erro ao iniciar</b><span>${escHtml(String(e))}</span></div></div>
-      <button class="upd-check-btn" onclick="renderUpdatePanel()">Voltar</button>`;
+      <button class="upd-check-btn" onclick="forceCheckUpdate()">Tentar de novo</button>`;
     return;
   }
+
+  // Depois do apply o núcleo morre e reabre: a partir daí falha de rede é o
+  // comportamento ESPERADO, não erro. Antes disso, não é.
+  let aplicando = false, falhas = 0;
 
   state.updatePoll = setInterval(async () => {
     try {
       const p = await api("/api/update/progress");
+      falhas = 0;
       const bar = $("#updDlBar"), txt = $("#updDlTxt");
       if (p.status === "downloading") {
         const pct = p.total > 0 ? Math.round(p.downloaded / p.total * 100) : 0;
@@ -3679,15 +3693,26 @@ async function startInstall(updateInfo) {
         clearInterval(state.updatePoll); state.updatePoll = null;
         if (bar) bar.style.width = "100%";
         if (txt) txt.textContent = "Aplicando atualização…";
+        aplicando = true;
         await api("/api/update/apply", {});
         body.innerHTML = `<div class="upd-status ok">${IC("ok")}<div><b>Atualizado!</b><span>O app vai reiniciar em instantes…</span></div></div>`;
       }
       if (p.status === "error") {
         clearInterval(state.updatePoll); state.updatePoll = null;
         body.innerHTML = `<div class="upd-status">${IC("err")}<div><b>Erro no download</b><span>${escHtml(p.error || "Tente novamente")}</span></div></div>
-          <button class="upd-check-btn" onclick="renderUpdatePanel()">Voltar</button>`;
+          <button class="upd-check-btn" onclick="forceCheckUpdate()">Tentar de novo</button>`;
       }
-    } catch { /* ignora erros de poll durante o restart */ }
+    } catch {
+      // Se o núcleo parou de responder ANTES de aplicar, insistir para sempre
+      // deixa a barra parada e — pior — `state.updatePoll` preso, o que faz o
+      // botão Instalar não reagir a mais nenhum clique depois. Beco sem saída
+      // silencioso: o usuário clica e não acontece nada. Desiste e diz por quê.
+      if (aplicando) return;                 // aqui a queda é esperada (o app reinicia)
+      if (++falhas < 20) return;             // 10s de tolerância a soluço
+      clearInterval(state.updatePoll); state.updatePoll = null;
+      body.innerHTML = `<div class="upd-status">${IC("err")}<div><b>O núcleo parou de responder</b><span>A instalação não terminou. Feche e abra o ThazzDraco e tente de novo.</span></div></div>
+        <button class="upd-check-btn" onclick="forceCheckUpdate()">Tentar de novo</button>`;
+    }
   }, 500);
 }
 
@@ -3696,7 +3721,7 @@ async function forceCheckUpdate() {
   if (body) body.innerHTML = `<div class="upd-status checking">${IC("ring")}<div><b>Verificando…</b><span>Consultando GitHub</span></div></div>`;
   try {
     const r = await api("/api/update/check?force=1");
-    if (r && !r.pending) { _updateInfo = r; applyUpdateBadge(r); renderUpdatePanel(); }
+    if (r && !r.pending) { _updateInfo = r; _updateCheckedAt = Date.now(); applyUpdateBadge(r); renderUpdatePanel(); }
     else {
       // O backend local respondeu, mas ele NÃO conseguiu falar com o GitHub —
       // mostra retry em vez de spinner infinito.
@@ -3715,7 +3740,7 @@ async function checkForUpdate() {
   try {
     const r = await api("/api/update/check");
     if (r && !r.pending) { // pending=true = Go ainda não terminou a checagem inicial
-      _updateInfo = r; applyUpdateBadge(r);
+      _updateInfo = r; _updateCheckedAt = Date.now(); applyUpdateBadge(r);
       if (r.available && $("#updPanel")?.classList.contains("open")) renderUpdatePanel();
     }
   } catch {}
@@ -3731,7 +3756,7 @@ function scheduleUpdateCheck() {
     try {
       const r = await api("/api/update/check");
       if (r && !r.pending) {
-        _updateInfo = r; applyUpdateBadge(r);
+        _updateInfo = r; _updateCheckedAt = Date.now(); applyUpdateBadge(r);
         clearInterval(t);
         setInterval(checkForUpdate, 15 * 60 * 1000);
       }
